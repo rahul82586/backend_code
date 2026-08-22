@@ -1,41 +1,13 @@
 ```
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-venv/
-.venv/
+# Archives and compressed files
+*.zip
+*.pdf
+
+# Logs
+logs/
+
+# Environment files
 .env
 .env.local
 *.env.*
-
-# Build and distribution artifacts
-dist/
-build/
-*.egg-info/
-
-# Logs
-*.log
-
-# Editor/IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-
-# Coverage
-.coverage
-coverage/
-htmlcov/
-
-# Testing
-.pytest_cache/
-.mypy_cache/
-
-# OS
-.DS_Store
-Thumbs.db
 ```
