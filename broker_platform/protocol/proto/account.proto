@@ -1,0 +1,293 @@
+syntax = "proto3";
+
+package broker.account;
+
+import "google/protobuf/timestamp.proto";
+
+// ============================================================================
+// ACCOUNT ENUMS
+// ============================================================================
+
+enum AccountType {
+    ACCOUNT_TYPE_UNSPECIFIED = 0;
+    ACCOUNT_TYPE_REAL = 1;
+    ACCOUNT_TYPE_DEMO = 2;
+    ACCOUNT_TYPE_CONTEST = 3;
+}
+
+enum AccountMode {
+    ACCOUNT_MODE_UNSPECIFIED = 0;
+    ACCOUNT_MODE_HEDGE = 1;                 // Multiple positions per symbol allowed
+    ACCOUNT_MODE_NETTING = 2;               // Single position per symbol
+}
+
+enum AccountStatus {
+    ACCOUNT_STATUS_UNSPECIFIED = 0;
+    ACCOUNT_STATUS_ACTIVE = 1;
+    ACCOUNT_STATUS_DISABLED = 2;
+    ACCOUNT_STATUS_FROZEN = 3;              // Frozen pending investigation
+    ACCOUNT_STATUS_CLOSED = 4;
+}
+
+enum MarginCallLevel {
+    MARGIN_CALL_LEVEL_UNSPECIFIED = 0;
+    MARGIN_CALL_LEVEL_NORMAL = 1;           // Equity > Margin * 100%
+    MARGIN_CALL_LEVEL_WARNING = 2;          // Equity < Margin * 100% (warning)
+    MARGIN_CALL_LEVEL_MARGIN_CALL = 3;      // Equity < Margin * 80% (margin call)
+    MARGIN_CALL_LEVEL_STOP_OUT = 4;         // Equity < Margin * 50% (positions closed)
+}
+
+// ============================================================================
+// ACCOUNT STATE MESSAGES
+// ============================================================================
+
+message AccountBalance {
+    string account_id = 1;
+    int64 balance = 2;                      // Current balance in cents/smallest unit
+    int64 equity = 3;                       // Balance + unrealized P&L
+    int64 margin_used = 4;                  // Margin currently in use
+    int64 margin_free = 5;                  // Available margin for new orders
+    int64 margin_level = 6;                 // Margin level in basis points (e.g., 50000 = 500%)
+    
+    int64 unrealized_pnl = 7;               // Unrealized P&L from open positions
+    int64 realized_pnl = 8;                 // Realized P&L today
+    
+    google.protobuf.Timestamp updated_at = 9;
+    string currency = 10;                   // Account currency (USD, EUR, etc.)
+}
+
+message Position {
+    string position_id = 1;
+    string account_id = 2;
+    string symbol = 3;
+    
+    enum PositionSide {
+        POSITION_SIDE_UNSPECIFIED = 0;
+        POSITION_SIDE_BUY = 1;
+        POSITION_SIDE_SELL = 2;
+    }
+    PositionSide side = 4;
+    
+    int64 volume = 5;                       // Volume in lots * 10000
+    int64 open_price = 6;                   // Open price (fixed-point)
+    int64 current_price = 7;                // Current market price
+    int64 unrealized_pnl = 8;               // Unrealized P&L
+    
+    optional int64 take_profit = 9;         // Take profit level (ticks)
+    optional int64 stop_loss = 10;          // Stop loss level (ticks)
+    
+    google.protobuf.Timestamp opened_at = 11;
+    string order_id = 12;                   // Originating order ID
+    
+    // Swap/rollover
+    int64 swap_long = 13;                   // Daily swap for long positions
+    int64 swap_short = 14;                  // Daily swap for short positions
+    int64 accumulated_swap = 15;            // Total swap accumulated
+}
+
+message Deal {
+    string deal_id = 1;
+    string account_id = 2;
+    string order_id = 3;
+    string position_id = 4;
+    string symbol = 5;
+    
+    enum DealType {
+        DEAL_TYPE_UNSPECIFIED = 0;
+        DEAL_TYPE_BUY = 1;
+        DEAL_TYPE_SELL = 2;
+        DEAL_TYPE_BALANCE = 3;              // Deposit/withdrawal
+        DEAL_TYPE_CREDIT = 4;               // Credit operation
+        DEAL_TYPE_CHARGE = 5;               // Commission/fee charge
+        DEAL_TYPE_SWAP = 6;                 // Swap rollover
+        DEAL_TYPE_BONUS = 7;                // Bonus credit
+    }
+    DealType type = 6;
+    
+    int64 volume = 7;                       // Deal volume
+    int64 price = 8;                        // Deal price
+    int64 commission = 9;                   // Commission charged
+    int64 swap = 10;                        // Swap amount
+    int64 profit = 11;                      // Profit/loss from deal
+    
+    string comment = 12;                    // Deal comment
+    google.protobuf.Timestamp timestamp = 13;
+}
+
+message AccountGroup {
+    string group_id = 1;
+    string name = 2;
+    
+    // Leverage settings
+    uint32 default_leverage = 3;            // Default leverage (e.g., 100)
+    
+    // Margin call / stop out levels (in percent)
+    uint32 margin_call_level = 4;           // Margin call trigger (e.g., 80)
+    uint32 stop_out_level = 5;              // Stop out trigger (e.g., 50)
+    
+    // Trading permissions
+    bool hedge_allowed = 6;
+    bool expert_advisors_allowed = 7;
+    bool trading_enabled = 8;
+    
+    // A/B book routing
+    uint32 a_book_threshold_volume = 9;     // Orders >= this go to A-Book
+    repeated string allowed_symbols = 10;   // Symbol whitelist
+    
+    // Risk limits
+    uint32 max_nop_per_symbol = 11;         // Max Net Open Position per symbol
+    uint32 max_total_nop = 12;              // Max total NOP across all symbols
+}
+
+// ============================================================================
+// RISK ACCOUNT (Centroid-style Master/Slave)
+// ============================================================================
+
+message RiskAccount {
+    string risk_account_id = 1;
+    string master_account_id = 2;           // Parent/master account
+    
+    // Slave accounts linked to this risk account
+    repeated string slave_account_ids = 3;
+    
+    // Net Open Position limits
+    map<string, int64> nop_limits_by_symbol = 4;  // Symbol -> max NOP (lots * 10000)
+    int64 total_nop_limit = 5;              // Total NOP limit across all symbols
+    
+    // Auto-hedge settings
+    bool auto_hedge_enabled = 6;
+    string hedge_maker_account_id = 7;      // Account to hedge against
+    uint32 hedge_threshold_percent = 8;     // Hedge when NOP > X% of limit
+    
+    // Current exposure
+    map<string, int64> current_nop_by_symbol = 9;
+    int64 current_total_nop = 10;
+}
+
+// ============================================================================
+// ACCOUNT EVENTS
+// ============================================================================
+
+message AccountEvent {
+    string event_id = 1;
+    google.protobuf.Timestamp timestamp = 2;
+    string account_id = 3;
+    
+    enum EventType {
+        EVENT_TYPE_UNSPECIFIED = 0;
+        EVENT_TYPE_BALANCE_UPDATE = 1;
+        EVENT_TYPE_POSITION_OPENED = 2;
+        EVENT_TYPE_POSITION_CLOSED = 3;
+        EVENT_TYPE_POSITION_MODIFIED = 4;
+        EVENT_TYPE_MARGIN_CALL = 5;
+        EVENT_TYPE_STOP_OUT_INITIATED = 6;
+        EVENT_TYPE_DEPOSIT = 7;
+        EVENT_TYPE_WITHDRAWAL = 8;
+        EVENT_TYPE_SWAP_CHARGED = 9;
+    }
+    
+    EventType event_type = 4;
+    AccountBalance balance_snapshot = 5;
+    optional Position position = 6;
+    optional Deal deal = 7;
+    string reason = 8;                      // For margin calls, stop-outs
+}
+
+message MarginCallEvent {
+    string account_id = 1;
+    google.protobuf.Timestamp timestamp = 2;
+    
+    MarginCallLevel level = 3;
+    int64 equity = 4;
+    int64 margin_used = 5;
+    int64 margin_level_bps = 6;             // Margin level in basis points
+    
+    repeated Position positions_to_close = 7;  // Positions selected for closure
+}
+
+// ============================================================================
+// ACCOUNT SERVICE (gRPC)
+// ============================================================================
+
+message GetAccountRequest {
+    string account_id = 1;
+}
+
+message GetAccountResponse {
+    AccountBalance balance = 1;
+    AccountGroup group = 2;
+    AccountType account_type = 3;
+    AccountMode account_mode = 4;
+    AccountStatus status = 5;
+    uint32 leverage = 6;
+}
+
+message ListPositionsRequest {
+    string account_id = 1;
+    optional string symbol_filter = 2;
+}
+
+message ListPositionsResponse {
+    repeated Position positions = 1;
+}
+
+message ListDealsRequest {
+    string account_id = 1;
+    google.protobuf.Timestamp start_time = 2;
+    google.protobuf.Timestamp end_time = 3;
+    uint32 max_results = 4;
+}
+
+message ListDealsResponse {
+    repeated Deal deals = 1;
+}
+
+message DepositRequest {
+    string request_id = 1;
+    string account_id = 2;
+    int64 amount = 3;                       // Amount in cents/smallest unit
+    string comment = 4;
+}
+
+message DepositResponse {
+    string request_id = 1;
+    bool success = 2;
+    string deal_id = 3;
+    string error_message = 4;
+}
+
+message WithdrawRequest {
+    string request_id = 1;
+    string account_id = 2;
+    int64 amount = 3;
+    string comment = 4;
+}
+
+message WithdrawResponse {
+    string request_id = 1;
+    bool success = 2;
+    string deal_id = 3;
+    string error_message = 4;
+}
+
+service AccountService {
+    // Get account state
+    rpc GetAccount(GetAccountRequest) returns (GetAccountResponse);
+    
+    // List positions
+    rpc ListPositions(ListPositionsRequest) returns (ListPositionsResponse);
+    
+    // List deals (history)
+    rpc ListDeals(ListDealsRequest) returns (ListDealsResponse);
+    
+    // Balance operations
+    rpc Deposit(DepositRequest) returns (DepositResponse);
+    rpc Withdraw(WithdrawRequest) returns (WithdrawResponse);
+    
+    // Stream account events
+    rpc StreamAccountEvents(string account_id) returns (stream AccountEvent);
+    
+    // Risk account management
+    rpc GetRiskAccount(string risk_account_id) returns (RiskAccount);
+    rpc UpdateRiskAccount(RiskAccount) returns (RiskAccount);
+}

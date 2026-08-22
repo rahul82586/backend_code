@@ -1,0 +1,196 @@
+syntax = "proto3";
+
+package broker.tick;
+
+import "google/protobuf/timestamp.proto";
+
+// ============================================================================
+// TICK ENUMS
+// ============================================================================
+
+enum TickType {
+    TICK_TYPE_UNSPECIFIED = 0;
+    TICK_TYPE_BID = 1;
+    TICK_TYPE_ASK = 2;
+    TICK_TYPE_LAST = 3;
+    TICK_TYPE_SETTLEMENT = 4;
+}
+
+enum QuoteCondition {
+    QUOTE_CONDITION_UNSPECIFIED = 0;
+    QUOTE_CONDITION_NORMAL = 1;
+    QUOTE_CONDITION_WIDE_SPREAD = 2;
+    QUOTE_CONDITION_CLOSED = 3;
+    QUOTE_CONDITION_CROSSING = 4;
+    QUOTE_CONDITION_NON_FIRM = 5;
+}
+
+// ============================================================================
+// MARKET DATA MESSAGES
+// ============================================================================
+
+message QuoteTick {
+    string symbol = 1;                      // Symbol name (e.g., "EURUSD")
+    google.protobuf.Timestamp timestamp = 2;
+    
+    int64 bid = 3;                          // Bid price (fixed-point: price * 10^digits)
+    int64 ask = 4;                          // Ask price (fixed-point)
+    optional int64 last = 5;                // Last traded price
+    
+    int64 bid_volume = 6;                   // Volume at bid (in lots * 10000)
+    int64 ask_volume = 7;                   // Volume at ask
+    
+    int32 digits = 8;                       // Number of decimal places
+    int64 spread = 9;                       // Spread in points (ask - bid)
+    
+    QuoteCondition condition = 10;          // Quote quality indicator
+    bool is_firm = 11;                      // True if quote is firm (executable)
+    
+    string source = 12;                     // Liquidity provider / feed source
+    uint64 sequence = 13;                   // Sequence number for gap detection
+}
+
+message TradeTick {
+    string symbol = 1;
+    google.protobuf.Timestamp timestamp = 2;
+    
+    int64 price = 3;                        // Trade price (fixed-point)
+    int64 volume = 4;                       // Trade volume (lots * 10000)
+    
+    enum TradeSide {
+        TRADE_SIDE_UNSPECIFIED = 0;
+        TRADE_SIDE_BUY = 1;
+        TRADE_SIDE_SELL = 2;
+    }
+    TradeSide side = 5;                     // Aggressor side
+    
+    string trade_id = 6;                    // Unique trade ID
+    string source = 7;                      // LP / exchange source
+}
+
+message OrderBookLevel {
+    int64 price = 1;                        // Price level (fixed-point)
+    int64 volume = 2;                       // Volume at level (lots * 10000)
+    uint32 order_count = 3;                 // Number of orders at level
+}
+
+message OrderBookDelta {
+    string symbol = 1;
+    google.protobuf.Timestamp timestamp = 2;
+    
+    enum DeltaType {
+        DELTA_TYPE_UNSPECIFIED = 0;
+        DELTA_TYPE_BID_ADD = 1;
+        DELTA_TYPE_BID_REMOVE = 2;
+        DELTA_TYPE_ASK_ADD = 3;
+        DELTA_TYPE_ASK_REMOVE = 4;
+        DELTA_TYPE_SNAPSHOT = 5;            // Full book snapshot
+    }
+    
+    DeltaType delta_type = 3;
+    bool is_bid_side = 4;                   // true = bid, false = ask
+    
+    repeated OrderBookLevel levels = 5;     // Changed levels
+    uint64 sequence = 6;                    // Sequence number
+}
+
+message OrderBookSnapshot {
+    string symbol = 1;
+    google.protobuf.Timestamp timestamp = 2;
+    
+    repeated OrderBookLevel bids = 3;       // Bid levels (descending price)
+    repeated OrderBookLevel asks = 4;       // Ask levels (ascending price)
+    
+    uint64 sequence = 5;
+    string source = 6;
+}
+
+// ============================================================================
+// SYMBOL SPECIFICATION (Static Reference Data)
+// ============================================================================
+
+message SymbolSpec {
+    string symbol = 1;                      // Symbol name
+    string description = 2;                 // Human-readable name
+    
+    int32 digits = 3;                       // Decimal places (e.g., 5 for EURUSD)
+    int64 contract_size = 4;                // Contract size (e.g., 100000 for FX)
+    
+    int64 margin_rate = 5;                  // Margin rate (basis points, e.g., 3333 = 33.33%)
+    int64 margin_currency = 6;              // Margin currency precision
+    
+    // Trading sessions
+    repeated TradingSession sessions = 7;
+    
+    // Tick value calculation
+    int64 tick_value = 8;                   // Tick value per lot
+    int64 tick_size = 9;                    // Minimum price movement
+    
+    // Risk limits
+    int64 max_volume = 10;                  // Maximum order volume
+    int64 min_volume = 11;                  // Minimum order volume
+    int64 volume_step = 12;                 // Volume step increment
+    
+    // Book routing
+    bool a_book_enabled = 13;
+    bool b_book_enabled = 14;
+    repeated string allowed_liquidity_providers = 15;
+    
+    // Session hours (UTC)
+    message TradingSession {
+        string day = 1;                     // MON, TUE, WED, THU, FRI, SAT, SUN
+        uint32 open_hour = 2;
+        uint32 open_minute = 3;
+        uint32 close_hour = 4;
+        uint32 close_minute = 5;
+    }
+}
+
+message SymbolSpecRequest {
+    optional string symbol_filter = 1;      // Filter by symbol pattern (* wildcard)
+}
+
+message SymbolSpecResponse {
+    repeated SymbolSpec symbols = 1;
+}
+
+// ============================================================================
+// TICK STREAMING SERVICE
+// ============================================================================
+
+message TickSubscriptionRequest {
+    repeated string symbols = 1;            // Symbols to subscribe to
+    bool include_orderbook = 2;             // Subscribe to order book deltas
+    uint32 orderbook_depth = 3;             // Depth for order book (e.g., 10)
+}
+
+message TickStream {
+    oneof tick_event {
+        QuoteTick quote_tick = 1;
+        TradeTick trade_tick = 2;
+        OrderBookDelta orderbook_delta = 3;
+        OrderBookSnapshot orderbook_snapshot = 4;
+    }
+}
+
+service MarketDataService {
+    // Stream real-time ticks
+    rpc SubscribeTicks(TickSubscriptionRequest) returns (stream TickStream);
+    
+    // Get latest snapshot for symbol
+    rpc GetLatestQuote(string symbol) returns (QuoteTick);
+    
+    // Get symbol specifications
+    rpc GetSymbolSpecs(SymbolSpecRequest) returns (SymbolSpecResponse);
+    
+    // Historical tick query (for History Server)
+    rpc GetHistoricalTicks(HistoricalTickRequest) returns (stream QuoteTick);
+}
+
+message HistoricalTickRequest {
+    string symbol = 1;
+    google.protobuf.Timestamp start_time = 2;
+    google.protobuf.Timestamp end_time = 3;
+    TickType tick_type = 4;
+    uint32 max_results = 5;
+}

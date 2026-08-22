@@ -1,0 +1,217 @@
+syntax = "proto3";
+
+package broker.order;
+
+import "google/protobuf/timestamp.proto";
+
+// ============================================================================
+// ORDER ENUMS
+// ============================================================================
+
+enum OrderSide {
+    ORDER_SIDE_UNSPECIFIED = 0;
+    ORDER_SIDE_BUY = 1;
+    ORDER_SIDE_SELL = 2;
+}
+
+enum OrderType {
+    ORDER_TYPE_UNSPECIFIED = 0;
+    ORDER_TYPE_MARKET = 1;
+    ORDER_TYPE_LIMIT = 2;
+    ORDER_TYPE_STOP = 3;
+    ORDER_TYPE_STOP_LIMIT = 4;
+}
+
+enum OrderTimeInForce {
+    ORDER_TIF_UNSPECIFIED = 0;
+    ORDER_TIF_GTC = 1;      // Good Till Cancelled
+    ORDER_TIF_IOC = 2;      // Immediate Or Cancel
+    ORDER_TIF_FOK = 3;      // Fill Or Kill
+    ORDER_TIF_DAY = 4;      // Day order
+    ORDER_TIF_GTD = 5;      // Good Till Date
+}
+
+enum OrderStatus {
+    ORDER_STATUS_UNSPECIFIED = 0;
+    ORDER_STATUS_NEW = 1;
+    ORDER_STATUS_PENDING_NEW = 2;
+    ORDER_STATUS_PARTIALLY_FILLED = 3;
+    ORDER_STATUS_FILLED = 4;
+    ORDER_STATUS_CANCELLED = 5;
+    ORDER_STATUS_REJECTED = 6;
+    ORDER_STATUS_PENDING_CANCEL = 7;
+    ORDER_STATUS_PENDING_REPLACE = 8;
+    ORDER_STATUS_PENDING_DEALER = 9;  // Awaiting dealer approval (A-Book)
+}
+
+enum OrderBook {
+    ORDER_BOOK_UNSPECIFIED = 0;
+    ORDER_BOOK_A_BOOK = 1;   // External liquidity (Maker/STP)
+    ORDER_BOOK_B_BOOK = 2;   // Internal book (Dealer risk)
+}
+
+// ============================================================================
+// ORDER MESSAGES
+// ============================================================================
+
+message Order {
+    string order_id = 1;                    // Unique order ID (UUID)
+    string client_order_id = 2;             // Client-supplied ID (idempotency)
+    string account_id = 3;                  // Trading account ID
+    string symbol = 4;                      // Symbol name (e.g., "EURUSD")
+    
+    OrderSide side = 5;
+    OrderType type = 6;
+    OrderTimeInForce time_in_force = 7;
+    
+    int64 quantity = 8;                     // Quantity in lots * 10000 (fixed-point)
+    int64 filled_quantity = 9;              // Filled quantity (same fixed-point)
+    
+    optional int64 price = 10;              // Limit price (if limit order)
+    optional int64 stop_price = 11;         // Stop price (if stop order)
+    optional int64 take_profit = 12;        // Take profit level (ticks)
+    optional int64 stop_loss = 13;          // Stop loss level (ticks)
+    
+    OrderStatus status = 14;
+    OrderBook book = 15;                    // A-Book or B-Book routing
+    
+    google.protobuf.Timestamp created_at = 16;
+    google.protobuf.Timestamp updated_at = 17;
+    google.protobuf.Timestamp expires_at = 18;  // For GTD orders
+    
+    string reject_reason = 19;              // If rejected, reason code
+    string dealer_notes = 20;               // Dealer approval notes
+    
+    // Risk metadata
+    optional int64 margin_required = 21;    // Margin required for this order
+    optional int64 slippage_tolerance = 22; // Max slippage in ticks
+}
+
+message OrderSubmitRequest {
+    string request_id = 1;
+    Order order = 2;
+}
+
+message OrderSubmitResponse {
+    string request_id = 1;
+    bool success = 2;
+    Order order = 3;
+    string error_message = 4;
+}
+
+message OrderCancelRequest {
+    string request_id = 1;
+    string order_id = 2;
+    string account_id = 3;
+}
+
+message OrderCancelResponse {
+    string request_id = 1;
+    bool success = 2;
+    string order_id = 3;
+    string error_message = 4;
+}
+
+message OrderModifyRequest {
+    string request_id = 1;
+    string order_id = 2;
+    string account_id = 3;
+    optional int64 new_quantity = 4;
+    optional int64 new_price = 5;
+    optional int64 new_stop_loss = 6;
+    optional int64 new_take_profit = 7;
+}
+
+message OrderModifyResponse {
+    string request_id = 1;
+    bool success = 2;
+    Order order = 3;
+    string error_message = 4;
+}
+
+// ============================================================================
+// ORDER EVENTS (For WAL and Event Streaming)
+// ============================================================================
+
+message OrderEvent {
+    string event_id = 1;
+    google.protobuf.Timestamp timestamp = 2;
+    string order_id = 3;
+    string account_id = 4;
+    
+    enum EventType {
+        EVENT_TYPE_UNSPECIFIED = 0;
+        EVENT_TYPE_SUBMITTED = 1;
+        EVENT_TYPE_ACCEPTED = 2;
+        EVENT_TYPE_REJECTED = 3;
+        EVENT_TYPE_PARTIALLY_FILLED = 4;
+        EVENT_TYPE_FILLED = 5;
+        EVENT_TYPE_CANCELLED = 6;
+        EVENT_TYPE_MODIFIED = 7;
+        EVENT_TYPE_PENDING_DEALER = 8;
+        EVENT_TYPE_DEALER_APPROVED = 9;
+        EVENT_TYPE_DEALER_REJECTED = 10;
+    }
+    
+    EventType event_type = 5;
+    Order order_snapshot = 6;               // Full order state at event time
+    optional int64 fill_price = 7;          // If fill event
+    optional int64 fill_quantity = 8;       // If fill event
+    string reason = 9;                      // Reject/cancel reason
+}
+
+// ============================================================================
+// DEALER QUEUE (For A-Book Manual Approval)
+// ============================================================================
+
+message DealerQueueItem {
+    string order_id = 1;
+    string account_id = 2;
+    string symbol = 3;
+    OrderSide side = 4;
+    int64 quantity = 5;
+    google.protobuf.Timestamp submitted_at = 6;
+    string dealer_assigned = 7;             // Assigned dealer ID
+    string priority = 8;                    // LOW, NORMAL, HIGH, URGENT
+}
+
+message DealerQueueRequest {
+    string dealer_id = 1;
+    optional string symbol_filter = 2;
+    optional int64 min_quantity = 3;
+}
+
+message DealerQueueResponse {
+    repeated DealerQueueItem items = 1;
+}
+
+message DealerDecisionRequest {
+    string request_id = 1;
+    string order_id = 2;
+    string dealer_id = 3;
+    bool approved = 4;                      // true = approve to A-Book, false = reject
+    string notes = 5;
+}
+
+message DealerDecisionResponse {
+    string request_id = 1;
+    bool success = 2;
+    string error_message = 3;
+}
+
+// ============================================================================
+// ORDER SERVICE (gRPC)
+// ============================================================================
+
+service OrderService {
+    rpc SubmitOrder(OrderSubmitRequest) returns (OrderSubmitResponse);
+    rpc CancelOrder(OrderCancelRequest) returns (OrderCancelResponse);
+    rpc ModifyOrder(OrderModifyRequest) returns (OrderModifyResponse);
+    
+    // Dealer queue operations
+    rpc GetDealerQueue(DealerQueueRequest) returns (DealerQueueResponse);
+    rpc MakeDealerDecision(DealerDecisionRequest) returns (DealerDecisionResponse);
+    
+    // Stream order events (for WAL replication)
+    rpc StreamOrderEvents(google.protobuf.Empty) returns (stream OrderEvent);
+}

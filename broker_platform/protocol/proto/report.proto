@@ -1,0 +1,321 @@
+syntax = "proto3";
+
+package broker.report;
+
+import "google/protobuf/timestamp.proto";
+
+// ============================================================================
+// REGULATORY REPORT TYPES (EMIR / NFA / MiFID II)
+// ============================================================================
+
+enum ReportType {
+    REPORT_TYPE_UNSPECIFIED = 0;
+    REPORT_TYPE_EMIR_TRADE_REPORT = 1;      // EMIR trade reporting
+    REPORT_TYPE_EMIR_POSITION_REPORT = 2;   // EMIR position reporting
+    REPORT_TYPE_NFA_CFTC_REPORT = 3;        // NFA/CFTC compliance
+    REPORT_TYPE_MIFID_TRANSACTION_REPORT = 4; // MiFID II transaction reporting
+    REPORT_TYPE_TAX_1099 = 5;               // US Tax 1099 form
+    REPORT_TYPE_TRADE_CONFIRMATION = 6;     // Client trade confirmation
+}
+
+enum ReportFormat {
+    REPORT_FORMAT_UNSPECIFIED = 0;
+    REPORT_FORMAT_CSV = 1;
+    REPORT_FORMAT_XML = 2;
+    REPORT_FORMAT_JSON = 3;
+    REPORT_FORMAT_FPFML = 4;                // FpML for derivatives
+    REPORT_FORMAT_ISO20022 = 5;             // ISO 20022 standard
+}
+
+enum ReportStatus {
+    REPORT_STATUS_UNSPECIFIED = 0;
+    REPORT_STATUS_PENDING = 1;
+    REPORT_STATUS_GENERATING = 2;
+    REPORT_STATUS_READY = 3;
+    REPORT_STATUS_UPLOADED = 4;             // Uploaded to regulator SFTP
+    REPORT_STATUS_SENT = 5;                 // Confirmed received by regulator
+    REPORT_STATUS_FAILED = 6;
+}
+
+// ============================================================================
+// REPORT REQUEST MESSAGES
+// ============================================================================
+
+message ReportRequest {
+    string request_id = 1;
+    ReportType report_type = 2;
+    ReportFormat format = 3;
+    
+    string account_id = 4;                  // Single account or "*" for all
+    optional string symbol_filter = 5;      // Filter by symbol
+    
+    google.protobuf.Timestamp start_time = 6;
+    google.protobuf.Timestamp end_time = 7;
+    
+    // Regulatory jurisdiction
+    string jurisdiction = 8;                // e.g., "EU", "US", "UK"
+    string regulator_code = 9;              // e.g., "ESMA", "CFTC", "FCA"
+    
+    // Output settings
+    string output_path = 10;                // Path in storage/cold/confirms/
+    bool compress = 11;                     // Compress to .gz
+    bool encrypt = 12;                      // Encrypt with regulator public key
+}
+
+message ReportResponse {
+    string request_id = 1;
+    bool success = 2;
+    string report_id = 3;
+    ReportStatus status = 4;
+    string file_path = 5;                   // Path to generated report
+    string error_message = 6;
+}
+
+// ============================================================================
+// EMIR-SPECIFIC MESSAGES
+// ============================================================================
+
+message EmirTradeReport {
+    string report_id = 1;
+    google.protobuf.Timestamp generation_timestamp = 2;
+    
+    // Counterparty data
+    string executing_entity = 3;            // LEI of executing entity
+    string counterparty_1 = 4;              // LEI of counterparty 1
+    string counterparty_2 = 5;              // LEI of counterparty 2
+    
+    // Trade details
+    repeated EmirTradeRecord trades = 6;
+    
+    // Submission metadata
+    string submission_deadline = 7;         // T+1 deadline
+    bool is_correction = 8;                 // True if correcting previous report
+    optional string original_report_id = 9; // If correction, original report ID
+}
+
+message EmirTradeRecord {
+    string trade_id = 1;
+    string uti = 2;                         // Unique Transaction Identifier
+    string product_classification = 3;      // FX swap, NDF, option, etc.
+    
+    string notional_currency = 4;
+    int64 notional_amount = 5;              // In smallest unit
+    
+    google.protobuf.Timestamp execution_timestamp = 6;
+    google.protobuf.Timestamp maturity_date = 7;
+    
+    string underlying_asset = 8;            // e.g., "EURUSD"
+    string price_notation = 9;              // PRICE, SPREAD, YIELD
+    
+    int64 upi = 10;                         // Unique Product Identifier
+    string venue_of_execution = 11;         // MIC code or "OFFX" for OTC
+    
+    // Counterparty side
+    enum Side {
+        SIDE_UNSPECIFIED = 0;
+        SIDE_BUYER = 1;
+        SIDE_SELLER = 2;
+    }
+    Side side = 12;
+    
+    // Valuation
+    optional int64 mark_to_market = 13;     // Current MTM value
+    google.protobuf.Timestamp valuation_timestamp = 14;
+}
+
+// ============================================================================
+// NFA/CFTC-SPECIFIC MESSAGES
+// ============================================================================
+
+message NfaCftcReport {
+    string report_id = 1;
+    google.protobuf.Timestamp generation_timestamp = 2;
+    
+    string firm_id = 3;                     // NFA Firm ID
+    string reporting_period_start = 4;
+    string reporting_period_end = 5;
+    
+    repeated NfaPositionRecord positions = 6;
+    repeated NfaTradeRecord trades = 7;
+    
+    // Large trader reporting
+    repeated LargeTraderReport large_traders = 8;
+}
+
+message NfaPositionRecord {
+    string account_id = 1;
+    string symbol = 2;
+    int64 open_long_volume = 3;             // Total long volume
+    int64 open_short_volume = 4;            // Total short volume
+    int64 net_volume = 5;                   // Net volume (long - short)
+    
+    google.protobuf.Timestamp as_of_date = 6;
+    string futures_exchange = 7;            // Exchange code
+}
+
+message NfaTradeRecord {
+    string trade_id = 1;
+    string account_id = 2;
+    string symbol = 3;
+    
+    enum BuySellIndicator {
+        BSI_UNSPECIFIED = 0;
+        BSI_BUY = 1;
+        BSI_SELL = 2;
+    }
+    BuySellIndicator buy_sell = 4;
+    
+    int64 volume = 5;
+    int64 price = 6;
+    google.protobuf.Timestamp execution_time = 7;
+    
+    string clearing_firm = 8;               // Clearing firm ID
+    string broker_id = 9;                   // Executing broker ID
+}
+
+message LargeTraderReport {
+    string account_id = 1;
+    string symbol = 2;
+    
+    int64 reportable_position = 3;          // Position above reporting threshold
+    google.protobuf.Timestamp report_date = 4;
+    
+    string form_1024b_submitted = 5;        // Form 1024-B filed?
+}
+
+// ============================================================================
+// TRADE CONFIRMATION (Client-Facing)
+// ============================================================================
+
+message TradeConfirmation {
+    string confirmation_id = 1;
+    string account_id = 2;
+    string client_name = 3;
+    
+    google.protobuf.Timestamp generation_timestamp = 4;
+    
+    repeated ConfirmationDeal deals = 5;
+    
+    // Summary
+    int64 total_commission = 6;
+    int64 total_swap = 7;
+    int64 net_profit_loss = 8;
+    
+    // Broker details
+    string broker_name = 9;
+    string broker_registration = 10;        // Regulatory registration number
+    string broker_contact = 11;
+}
+
+message ConfirmationDeal {
+    string deal_id = 1;
+    string order_id = 2;
+    string symbol = 3;
+    
+    enum DealType {
+        DEAL_TYPE_UNSPECIFIED = 0;
+        DEAL_TYPE_OPEN_LONG = 1;
+        DEAL_TYPE_OPEN_SHORT = 2;
+        DEAL_TYPE_CLOSE_LONG = 3;
+        DEAL_TYPE_CLOSE_SHORT = 4;
+    }
+    DealType type = 4;
+    
+    int64 volume = 5;
+    int64 price = 6;
+    google.protobuf.Timestamp timestamp = 7;
+    
+    int64 commission = 8;
+    int64 swap = 9;
+    int64 profit_loss = 10;
+    
+    string comment = 11;
+}
+
+// ============================================================================
+// SFTP UPLOAD MANAGEMENT (Regulator Submission)
+// ============================================================================
+
+message SftpUploadRequest {
+    string request_id = 1;
+    string file_path = 2;                   // Local path to report file
+    string sftp_host = 3;                   // Regulator SFTP hostname
+    string sftp_port = 4;
+    string sftp_username = 5;
+    string remote_path = 6;                 // Remote directory on SFTP
+    
+    // Authentication (references to secrets manager)
+    string secret_key_ref = 7;              // Reference to Vault/K8s secret
+    optional string passphrase_ref = 8;
+}
+
+message SftpUploadResponse {
+    string request_id = 1;
+    bool success = 2;
+    string upload_timestamp = 3;
+    string remote_file_path = 4;
+    string error_message = 5;
+}
+
+message SftpSentConfirmation {
+    string upload_id = 1;
+    bool confirmed_received = 2;            // Regulator confirmed receipt
+    string confirmation_receipt = 3;        // Receipt ID from regulator
+    google.protobuf.Timestamp confirmed_at = 4;
+}
+
+// ============================================================================
+// REPORTING SERVICE (gRPC)
+// ============================================================================
+
+service ReportingService {
+    // Generate regulatory reports
+    rpc GenerateReport(ReportRequest) returns (ReportResponse);
+    
+    // Get report status
+    rpc GetReportStatus(string report_id) returns (ReportResponse);
+    
+    // List reports for account/period
+    rpc ListReports(ListReportsRequest) returns (ListReportsResponse);
+    
+    // Upload to regulator SFTP
+    rpc UploadToSftp(SftpUploadRequest) returns (SftpUploadResponse);
+    
+    // Confirm SFTP delivery
+    rpc ConfirmSftpDelivery(SftpSentConfirmation) returns (SftpSentConfirmation);
+    
+    // Stream report generation events
+    rpc StreamReportEvents(string report_id) returns (stream ReportEvent);
+}
+
+message ListReportsRequest {
+    string account_id = 1;
+    optional ReportType report_type = 2;
+    google.protobuf.Timestamp start_time = 3;
+    google.protobuf.Timestamp end_time = 4;
+    uint32 max_results = 5;
+}
+
+message ListReportsResponse {
+    repeated ReportResponse reports = 1;
+}
+
+message ReportEvent {
+    string event_id = 1;
+    google.protobuf.Timestamp timestamp = 2;
+    string report_id = 3;
+    
+    enum EventType {
+        EVENT_TYPE_UNSPECIFIED = 0;
+        EVENT_TYPE_GENERATION_STARTED = 1;
+        EVENT_TYPE_GENERATION_COMPLETED = 2;
+        EVENT_TYPE_UPLOAD_STARTED = 3;
+        EVENT_TYPE_UPLOAD_COMPLETED = 4;
+        EVENT_TYPE_CONFIRMATION_RECEIVED = 5;
+        EVENT_TYPE_FAILED = 6;
+    }
+    
+    EventType event_type = 4;
+    string message = 5;
+    optional string file_path = 6;
+}
