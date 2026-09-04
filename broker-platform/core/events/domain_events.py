@@ -37,6 +37,14 @@ class EventType(Enum):
     STOP_OUT = "risk.stop_out"
     NODE_HEARTBEAT = "system.node_heartbeat"
 
+    # Execution Events (Phase 5)
+    ORDER_ROUTED = "execution.order_routed"
+    ORDER_QUEUED_FOR_DEALER = "execution.order_queued_for_dealer"
+    ORDER_DEALER_CONFIRMED = "execution.order_dealer_confirmed"
+    ORDER_DEALER_REJECTED = "execution.order_dealer_rejected"
+    ORDER_REQUOTED = "execution.order_requoted"
+    COVERAGE_EXPOSURE_UPDATED = "execution.coverage_exposure_updated"
+
 
 @dataclass(frozen=True)
 class DomainEvent:
@@ -162,3 +170,44 @@ class StopOutEvent(DomainEvent):
     """Published when positions are forcibly closed due to insufficient margin."""
     event_type: EventType = field(default=EventType.STOP_OUT, init=False)
     # Payload expects: account_id, position_id, close_price, reason
+
+
+# =============================================================================
+# Execution Events (Phase 5)
+# =============================================================================
+
+@dataclass(frozen=True)
+class OrderRouted(DomainEvent):
+    """Published when an order is routed to a specific execution destination."""
+    event_type: EventType = field(default=EventType.ORDER_ROUTED, init=False)
+    # Payload expects: order_id, destination, rule_id, gateway_id
+
+@dataclass(frozen=True)
+class OrderQueuedForDealer(DomainEvent):
+    """Published when an order is placed in the dealer queue for manual intervention."""
+    event_type: EventType = field(default=EventType.ORDER_QUEUED_FOR_DEALER, init=False)
+    # Payload expects: order_id, account_login, symbol, volume, timeout_at
+
+@dataclass(frozen=True)
+class OrderDealerConfirmed(DomainEvent):
+    """Published when a dealer manually confirms an order."""
+    event_type: EventType = field(default=EventType.ORDER_DEALER_CONFIRMED, init=False)
+    # Payload expects: order_id, dealer_id, confirmed_at
+
+@dataclass(frozen=True)
+class OrderDealerRejected(DomainEvent):
+    """Published when a dealer manually rejects an order."""
+    event_type: EventType = field(default=EventType.ORDER_DEALER_REJECTED, init=False)
+    # Payload expects: order_id, dealer_id, reason
+
+@dataclass(frozen=True)
+class OrderRequoted(DomainEvent):
+    """Published when a dealer offers a requote to the client."""
+    event_type: EventType = field(default=EventType.ORDER_REQUOTED, init=False)
+    # Payload expects: order_id, dealer_id, new_price, reason
+
+@dataclass(frozen=True)
+class CoverageExposureUpdated(DomainEvent):
+    """Published when the broker's coverage account exposure is updated."""
+    event_type: EventType = field(default=EventType.COVERAGE_EXPOSURE_UPDATED, init=False)
+    # Payload expects: coverage_account_id, symbol, net_exposure, volume_delta

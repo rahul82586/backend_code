@@ -132,3 +132,97 @@ class IMatchingEngine(ABC, Generic[T]):
         Used for pre-trade checks and visibility.
         """
         pass
+
+
+class ILiquidityGateway(ABC, Generic[T]):
+    """
+    Port for external Liquidity Provider (LP) connectivity.
+    
+    Architectural Purpose:
+    Abstracts away the specific protocol (FIX, REST, WebSocket) used to 
+    communicate with external LPs (LMAX, Binance, Centroid, etc.).
+    Allows adding/removing LPs without changing core execution logic.
+    """
+    
+    @abstractmethod
+    async def send_order(self, order: T, gateway_id: str) -> dict:
+        """
+        Sends an order to an external LP.
+        Returns an execution report/acknowledgment.
+        """
+        pass
+    
+    @abstractmethod
+    async def cancel_order(self, order_id: str, gateway_id: str) -> bool:
+        """
+        Cancels an order at the external LP.
+        Returns True if successful.
+        """
+        pass
+    
+    @abstractmethod
+    async def get_quotes(self, symbols: list[str]) -> dict[str, dict]:
+        """
+        Fetches current bid/ask quotes for multiple symbols.
+        Returns {symbol: {bid, ask, timestamp}}.
+        """
+        pass
+
+
+class ICoverageAccountRepository(ABC, Generic[T]):
+    """
+    Contract for Coverage Account (Risk Account) persistence.
+    
+    Architectural Purpose:
+    Manages the broker's internal hedge accounts used to offset B-Book exposure.
+    Critical for risk management and regulatory reporting.
+    """
+    
+    @abstractmethod
+    async def find_by_id(self, account_id: str) -> Optional[T]:
+        """Retrieves a coverage account by ID."""
+        pass
+    
+    @abstractmethod
+    async def save(self, account: T) -> T:
+        """Persists a coverage account."""
+        pass
+    
+    @abstractmethod
+    async def update_exposure(
+        self, 
+        account_id: str, 
+        symbol: str, 
+        volume_delta: 'Decimal'
+    ) -> None:
+        """
+        Updates net exposure for a symbol.
+        volume_delta > 0: Client bought (Broker sold).
+        volume_delta < 0: Client sold (Broker bought).
+        """
+        pass
+
+
+class IRoutingRuleRepository(ABC, Generic[T]):
+    """
+    Contract for Routing Rule persistence.
+    
+    Architectural Purpose:
+    Manages the dynamic routing rules that determine A-Book vs B-Book allocation.
+    Rules can be updated at runtime without restarting the server.
+    """
+    
+    @abstractmethod
+    async def get_active_rules(self) -> List[T]:
+        """Returns all enabled routing rules sorted by priority."""
+        pass
+    
+    @abstractmethod
+    async def save(self, rule: T) -> T:
+        """Creates or updates a routing rule."""
+        pass
+    
+    @abstractmethod
+    async def delete(self, rule_id: str) -> bool:
+        """Deletes a routing rule."""
+        pass
