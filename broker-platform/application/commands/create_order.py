@@ -13,7 +13,7 @@ from core.domains.instruments.models import Symbol
 from core.domains.oms.entities.order import Order, OrderType, OrderState
 from core.domains.common.value_objects import Price, Volume, Money
 from core.events.domain_events import OrderCreated
-from core.ports.interfaces import IOrderRepository, IEventBus, IAccountRepository, IMarketDataFeed
+from core.ports.interfaces import IOrderRepository, IEventBus, IAccountRepository, IMarketDataFeed, IInstrumentRepository
 
 from application.services.risk_service import PreTradeRiskService
 
@@ -52,13 +52,16 @@ class CreateOrderHandler:
         order_repo: IOrderRepository,
         account_repo: IAccountRepository,
         market_feed: IMarketDataFeed,
-        event_bus: IEventBus
+        event_bus: IEventBus,
+        instrument_repo: IInstrumentRepository,
+        risk_service: PreTradeRiskService
     ):
         self.order_repo = order_repo
         self.account_repo = account_repo
         self.market_feed = market_feed
         self.event_bus = event_bus
-        self.risk_service = PreTradeRiskService(event_bus)
+        self.instrument_repo = instrument_repo
+        self.risk_service = risk_service
 
     async def execute(self, command: CreateOrderCommand) -> Order:
         """
@@ -99,12 +102,13 @@ class CreateOrderHandler:
                 raise RuntimeError(f"No market data available for {command.symbol}")
             
             # Simple logic: Buy uses Ask, Sell uses Bid
+            # CRITICAL FIX: Prices now come as strings/Decimal from market feed to avoid float precision loss
             if command.order_type in [OrderType.BUY, OrderType.BUY_LIMIT, OrderType.BUY_STOP]:
-                execution_price = float(tick['ask'])
+                execution_price = Decimal(tick['ask'])  # tick['ask'] is now str or Decimal
             else:
-                execution_price = float(tick['bid'])
+                execution_price = Decimal(tick['bid'])  # tick['bid'] is now str or Decimal
         
-        price_obj = Price(Decimal(str(execution_price)))
+        price_obj = Price(execution_price)
         volume_obj = Volume(Decimal(str(command.volume)))
 
         # 4. Construct Order Entity (Transient)
@@ -163,11 +167,6 @@ class CreateOrderHandler:
 
     async def _get_symbol_definition(self, symbol_name: str) -> Optional[Symbol]:
         """
-        Helper to fetch symbol definition.
-        In a real app, this would use an IInstrumentRepository port.
-        For now, we simulate it or assume a static lookup.
+        Helper to fetch symbol definition from the Instrument Repository.
         """
-        # TODO: Inject IInstrumentRepository in __init__ and use it here
-        # Placeholder implementation
-        logger.warning("Symbol lookup placeholder implemented. Inject IInstrumentRepository for production.")
-        return None 
+        return await self.instrument_repo.find_by_name(symbol_name)
