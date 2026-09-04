@@ -7,6 +7,10 @@ class Money:
     """
     Value Object for Currency.
     Ensures no floating point math occurs on balances.
+    
+    CRITICAL FIX: Negative amounts ARE allowed to represent losses, 
+    withdrawals, fees, and commissions in double-entry accounting.
+    The Account Balance logic (not this VO) prevents negative equity.
     """
     amount: Decimal
     currency: str = "USD"
@@ -14,8 +18,8 @@ class Money:
     def __post_init__(self):
         if not isinstance(self.amount, Decimal):
             object.__setattr__(self, 'amount', Decimal(str(self.amount)))
-        if self.amount < 0:
-            raise ValueError("Money amount cannot be negative")
+        # REMOVED: if self.amount < 0: raise ValueError(...)
+        # Negative money is valid for accounting entries
 
     def __add__(self, other: 'Money') -> 'Money':
         if self.currency != other.currency:
@@ -26,6 +30,10 @@ class Money:
         if self.currency != other.currency:
             raise ValueError("Cannot subtract money with different currencies")
         return Money(self.amount - other.amount, self.currency)
+
+    def __neg__(self) -> 'Money':
+        """Allows negation: -Money(50) = Money(-50)"""
+        return Money(-self.amount, self.currency)
 
 @dataclass(frozen=True)
 class Price:
