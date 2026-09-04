@@ -18,6 +18,7 @@ class EventType(Enum):
     ORDER_MODIFIED = "order.modified"
     ORDER_CANCELLED = "order.cancelled"
     ORDER_REJECTED = "order.rejected"
+    ORDER_APPROVED = "order.approved"  # Added for Phase 4
     
     DEAL_CREATED = "deal.created"
     DEAL_MODIFIED = "deal.modified"  # For MT5-style trade corrections
@@ -94,6 +95,13 @@ class OrderRejected(DomainEvent):
     """Published when an order is rejected (e.g., risk check failure)."""
     event_type: EventType = field(default=EventType.ORDER_REJECTED, init=False)
     # Payload expects: order_id, reason_code, message
+
+
+@dataclass(frozen=True)
+class OrderApproved(DomainEvent):
+    """Published when an order passes all pre-trade risk checks."""
+    event_type: EventType = field(default=EventType.ORDER_APPROVED, init=False)
+    # Payload expects: order_id, account_login, symbol, volume, approved_at
 
 
 @dataclass(frozen=True)
