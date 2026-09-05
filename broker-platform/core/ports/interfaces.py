@@ -226,3 +226,111 @@ class IRoutingRuleRepository(ABC, Generic[T]):
     async def delete(self, rule_id: str) -> bool:
         """Deletes a routing rule."""
         pass
+
+
+class IPositionRepository(ABC, Generic[T]):
+    """
+    Contract for Position persistence.
+    
+    Architectural Purpose:
+    Manages open positions for margin calculations and risk monitoring.
+    Used by the RiskWorker to fetch positions for stop-out checks.
+    """
+    
+    @abstractmethod
+    async def get_open_positions(self) -> List[T]:
+        """Returns all open positions across all accounts."""
+        pass
+    
+    @abstractmethod
+    async def get_positions_by_account(self, account_login: str) -> List[T]:
+        """Returns all open positions for a specific account."""
+        pass
+    
+    @abstractmethod
+    async def save(self, position: T) -> T:
+        """Persists a position (create or update)."""
+        pass
+    
+    @abstractmethod
+    async def close(self, position_id: str) -> bool:
+        """Marks a position as closed."""
+        pass
+
+
+class IRiskNotifier(ABC):
+    """
+    Port for sending margin call / stop out notifications.
+    
+    Architectural Purpose:
+    Abstracts the notification delivery mechanism (Email, SMS, Push, etc.).
+    Implementations can send notifications via multiple channels without
+    changing the core risk monitoring logic.
+    """
+    
+    @abstractmethod
+    async def send_margin_call_alert(self, account_login: str, margin_level: 'Decimal') -> None:
+        """
+        Sends a margin call alert to the client.
+        
+        Args:
+            account_login: The client's account login
+            margin_level: Current margin level percentage
+        """
+        pass
+    
+    @abstractmethod
+    async def send_stop_out_alert(self, account_login: str, closed_positions: List[str]) -> None:
+        """
+        Sends a stop-out notification after positions have been closed.
+        
+        Args:
+            account_login: The client's account login
+            closed_positions: List of position IDs that were force-closed
+        """
+        pass
+
+
+class ISymbolRepository(ABC, Generic[T]):
+    """
+    Contract for Symbol/Instrument persistence.
+    
+    Architectural Purpose:
+    Provides access to instrument specifications (contract size, tick value, etc.)
+    needed for margin and PnL calculations.
+    """
+    
+    @abstractmethod
+    def get_symbol(self, symbol_name: str) -> T:
+        """Returns symbol specification by name."""
+        pass
+    
+    @abstractmethod
+    async def get_all_symbols(self) -> List[T]:
+        """Returns all available symbols."""
+        pass
+
+
+class IMarketDataFeed(ABC):
+    """
+    Contract for real-time market data access.
+    
+    Architectural Purpose:
+    Provides current bid/ask prices for margin and PnL calculations.
+    Abstracts the data source (Redis cache, direct feed, etc.).
+    """
+    
+    @abstractmethod
+    def get_bid(self, symbol: str) -> 'Decimal':
+        """Returns current bid price for a symbol."""
+        pass
+    
+    @abstractmethod
+    def get_ask(self, symbol: str) -> 'Decimal':
+        """Returns current ask price for a symbol."""
+        pass
+    
+    @abstractmethod
+    async def get_quotes(self, symbols: List[str]) -> dict[str, dict]:
+        """Returns quotes for multiple symbols."""
+        pass
