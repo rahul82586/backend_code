@@ -334,3 +334,15 @@ class IMarketDataFeed(ABC):
     async def get_quotes(self, symbols: List[str]) -> dict[str, dict]:
         """Returns quotes for multiple symbols."""
         pass
+
+
+class ILedgerRepository(ABC):
+    """Contract for BalanceOperation persistence."""
+    @abstractmethod
+    async def save(self, operation: BalanceOperation) -> BalanceOperation: ...
+    
+    @abstractmethod
+    async def get_by_account(self, account_login: str) -> List[BalanceOperation]: ...
+    
+    @abstractmethod
+    async def get_by_reference(self, reference_id: str) -> Optional[BalanceOperation]: ...

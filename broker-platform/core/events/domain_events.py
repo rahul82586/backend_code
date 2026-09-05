@@ -217,3 +217,28 @@ class CoverageExposureUpdated(DomainEvent):
     """Published when the broker's coverage account exposure is updated."""
     event_type: EventType = field(default=EventType.COVERAGE_EXPOSURE_UPDATED, init=False)
     # Payload expects: coverage_account_id, symbol, net_exposure, volume_delta
+
+
+# Ledger Events (Phase 7)
+COMMISSION_CHARGED = "ledger.commission_charged"
+SWAP_APPLIED = "ledger.swap_applied"
+BALANCE_DEPOSITED = "ledger.balance_deposited"
+BALANCE_WITHDRAWN = "ledger.balance_withdrawn"
+BALANCE_CORRECTED = "ledger.balance_corrected"
+
+
+@dataclass(frozen=True)
+class CommissionCharged(DomainEvent):
+    event_type: EventType = field(default=EventType.COMMISSION_CHARGED, init=False)
+
+@dataclass(frozen=True)
+class SwapApplied(DomainEvent):
+    event_type: EventType = field(default=EventType.SWAP_APPLIED, init=False)
+
+@dataclass(frozen=True)
+class BalanceDeposited(DomainEvent):
+    event_type: EventType = field(default=EventType.BALANCE_DEPOSITED, init=False)
+
+@dataclass(frozen=True)
+class BalanceWithdrawn(DomainEvent):
+    event_type: EventType = field(default=EventType.BALANCE_WITHDRAWN, init=False)
