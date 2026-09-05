@@ -9,10 +9,11 @@ Encapsulates the logic for WHERE an order should be executed (A-Book vs B-Book)
 and HOW manual dealer interventions are handled.
 """
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Dict, List, Optional
+import fnmatch
 
 
 class ExecutionDestination(Enum):
@@ -36,12 +37,13 @@ class RoutingRule:
     Attributes:
         rule_id: Unique identifier for the rule.
         priority: Higher value = evaluated first.
-        group_filter: Group name or None (match all groups).
-        symbol_filter: Symbol name or None (match all symbols).
+        group_filter: Group name or None (match all groups). Supports wildcards like 'real_*'.
+        symbol_filter: Symbol name or None (match all symbols). Supports wildcards like 'EUR*'.
         volume_min: Minimum volume to trigger this rule.
         volume_max: Maximum volume to trigger this rule.
         destination: Where to send the order if matched.
         gateway_id: Specific LP gateway ID (required for A_BOOK).
+        coverage_account_id: Which CoverageAccount to use for B-Book hedging (optional).
         is_enabled: Active status of the rule.
     """
     rule_id: str
@@ -56,6 +58,7 @@ class RoutingRule:
     
     # Action details
     gateway_id: Optional[str] = None
+    coverage_account_id: Optional[str] = None  # For B-Book: which coverage account to update
     is_enabled: bool = True
 
 
@@ -88,8 +91,12 @@ class CoverageAccount:
     def update_exposure(self, symbol: str, volume_delta: Decimal):
         """
         Updates net exposure for a symbol.
-        volume_delta > 0: Client bought (Broker sold/shorted exposure).
-        volume_delta < 0: Client sold (Broker bought/long exposure).
+        
+        SIGN CONVENTION (CRITICAL):
+        - volume_delta > 0: Client SOLD → Broker BOUGHT → Broker is LONG → exposure INCREASES (positive)
+        - volume_delta < 0: Client BOUGHT → Broker SOLD → Broker is SHORT → exposure DECREASES (negative)
+        
+        This matches the class docstring: Positive = broker is long (clients are net short).
         """
         current = self.net_exposure.get(symbol, Decimal('0'))
         self.net_exposure[symbol] = current + volume_delta
@@ -108,6 +115,7 @@ class ExecutionInstruction:
     destination: ExecutionDestination
     rule_id: str
     gateway_id: Optional[str] = None
+    coverage_account_id: Optional[str] = None  # Which CoverageAccount to use for B-Book
     reason: Optional[str] = None
 
 
@@ -122,4 +130,4 @@ class DealerDecision:
     action: str  # CONFIRM, REJECT, REQUOTE
     requote_price: Optional[Decimal] = None
     reason: Optional[str] = None
-    decided_at: datetime = field(default_factory=datetime.utcnow)
+    decided_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

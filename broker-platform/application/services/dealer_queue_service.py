@@ -10,7 +10,7 @@ Provides a human-in-the-loop mechanism for high-risk or unusual orders.
 Decouples the queuing logic from the UI (which will call these methods via API).
 """
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from decimal import Decimal
 import logging
@@ -42,6 +42,9 @@ class DealerQueueService:
         # Locks: ticket_id -> lock_expiry_time
         self.locks: Dict[str, datetime] = {}
         
+        # Timeout tasks: ticket_id -> asyncio.Task (for cancellation)
+        self.timeout_tasks: Dict[str, asyncio.Task] = {}
+        
         logger.info("DealerQueueService initialized")
 
     async def enqueue(self, order: Order, timeout_seconds: int = 30):
@@ -60,7 +63,11 @@ class DealerQueueService:
         # Lock the order
         order.state = OrderState.PLACED  # Frozen state waiting for dealer
         self.queue[order.ticket_id] = order
-        self.locks[order.ticket_id] = datetime.utcnow() + timedelta(seconds=timeout_seconds)
+        self.locks[order.ticket_id] = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
+        
+        # Create timeout watcher task
+        timeout_task = asyncio.create_task(self._watch_timeout(order.ticket_id, timeout_seconds))
+        self.timeout_tasks[order.ticket_id] = timeout_task
         
         # Emit event for UI notification
         event = DomainEvent(
@@ -77,6 +84,13 @@ class DealerQueueService:
         await self.event_bus.publish(event)
         
         logger.info(f"Order {order.ticket_id} queued for dealer intervention")
+    
+    async def _watch_timeout(self, ticket: str, timeout_seconds: int):
+        """Background task to auto-reject if dealer doesn't respond."""
+        await asyncio.sleep(timeout_seconds)
+        if ticket in self.queue and ticket in self.locks:
+            logger.warning(f"Order {ticket} dealer timeout expired - auto-rejecting")
+            await self.dealer_reject(ticket, "SYSTEM", "Dealer response timeout")
 
     async def dealer_confirm(self, ticket: str, dealer_id: str) -> Order:
         """
@@ -86,6 +100,11 @@ class DealerQueueService:
         """
         if ticket not in self.queue:
             raise ValueError(f"Order {ticket} not found in dealer queue")
+        
+        # Cancel timeout watcher
+        if ticket in self.timeout_tasks:
+            self.timeout_tasks[ticket].cancel()
+            del self.timeout_tasks[ticket]
         
         order = self.queue.pop(ticket)
         self.locks.pop(ticket, None)
@@ -113,6 +132,11 @@ class DealerQueueService:
         """
         if ticket not in self.queue:
             raise ValueError(f"Order {ticket} not found in dealer queue")
+        
+        # Cancel timeout watcher
+        if ticket in self.timeout_tasks:
+            self.timeout_tasks[ticket].cancel()
+            del self.timeout_tasks[ticket]
         
         order = self.queue.pop(ticket)
         self.locks.pop(ticket, None)
@@ -151,6 +175,11 @@ class DealerQueueService:
         if ticket not in self.queue:
             raise ValueError(f"Order {ticket} not found in dealer queue")
         
+        # Cancel timeout watcher
+        if ticket in self.timeout_tasks:
+            self.timeout_tasks[ticket].cancel()
+            del self.timeout_tasks[ticket]
+        
         order = self.queue[ticket]  # Keep in queue until client accepts
         
         # Emit requote event
@@ -174,7 +203,7 @@ class DealerQueueService:
         Return all orders waiting for dealer decision (for Dealer UI).
         Filters out expired orders (auto-reject logic could be added here).
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         active_orders = []
         
         for ticket, expiry in list(self.locks.items()):
@@ -192,11 +221,12 @@ class DealerQueueService:
         """
         Background task to check for timed-out orders.
         Should be called periodically (e.g., every 5 seconds).
+        Note: This is now redundant with _watch_timeout tasks, but kept for manual checks.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired_tickets = [
             ticket for ticket, expiry in self.locks.items()
-            if now >= expiry
+            if now >= expiry and ticket not in self.timeout_tasks  # Only check if no watcher task
         ]
         
         for ticket in expired_tickets:
