@@ -37,6 +37,12 @@ class EventType(Enum):
     STOP_OUT = "risk.stop_out"
     NODE_HEARTBEAT = "system.node_heartbeat"
 
+    # Risk Events (Phase 6)
+    MARGIN_CALL_TRIGGERED = "risk.margin_call_triggered"
+    STOP_OUT_INITIATED = "risk.stop_out_initiated"
+    POSITION_FORCE_CLOSED = "risk.position_force_closed"
+    RISK_STATUS_UPDATED = "risk.status_updated"
+
     # Execution Events (Phase 5)
     ORDER_ROUTED = "execution.order_routed"
     ORDER_QUEUED_FOR_DEALER = "execution.order_queued_for_dealer"
