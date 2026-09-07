@@ -7,8 +7,8 @@ class Money:
     """
     Value Object for Currency.
     Ensures no floating point math occurs on balances.
-    
-    CRITICAL FIX: Negative amounts ARE allowed to represent losses, 
+
+    CRITICAL FIX: Negative amounts ARE allowed to represent losses,
     withdrawals, fees, and commissions in double-entry accounting.
     The Account Balance logic (not this VO) prevents negative equity.
     """

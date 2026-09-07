@@ -19,10 +19,10 @@ class EventType(Enum):
     ORDER_CANCELLED = "order.cancelled"
     ORDER_REJECTED = "order.rejected"
     ORDER_APPROVED = "order.approved"  # Added for Phase 4
-    
+
     DEAL_CREATED = "deal.created"
     DEAL_MODIFIED = "deal.modified"  # For MT5-style trade corrections
-    
+
     POSITION_OPENED = "position.opened"
     POSITION_CLOSED = "position.closed"
     POSITION_UPDATED = "position.updated"
@@ -63,7 +63,7 @@ class EventType(Enum):
 class DomainEvent:
     """
     Base class for all domain events.
-    
+
     Architectural Purpose:
     Acts as the standard envelope for communication between bounded contexts.
     Being frozen ensures immutability once created, guaranteeing event integrity

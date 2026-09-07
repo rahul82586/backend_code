@@ -39,14 +39,14 @@ class CreateOrderCommand:
 class CreateOrderHandler:
     """
     Command Handler for CreateOrderCommand.
-    
+
     Architectural Purpose:
-    Implements the CQRS 'Command' side. It contains the application logic 
-    (orchestration) but delegates business rules to the Domain Entities 
-    and Risk Service. It relies strictly on Ports (Interfaces), not 
+    Implements the CQRS 'Command' side. It contains the application logic
+    (orchestration) but delegates business rules to the Domain Entities
+    and Risk Service. It relies strictly on Ports (Interfaces), not
     concrete Infrastructure implementations.
     """
-    
+
     def __init__(
         self,
         order_repo: IOrderRepository,
@@ -75,12 +75,12 @@ class CreateOrderHandler:
         7. Publish Event
         """
         logger.info(f"Processing CreateOrderCommand for {command.account_login} on {command.symbol}")
-        
+
         # 1. Fetch Account
         account = await self.account_repo.find_by_login(command.account_login)
         if not account:
             raise ValueError(f"Account {command.account_login} not found")
-        
+
         if not account.can_trade():
             raise PermissionError(f"Account {command.account_login} is not allowed to trade")
 
@@ -100,14 +100,14 @@ class CreateOrderHandler:
             tick = await self.market_feed.get_latest_tick(command.symbol)
             if not tick:
                 raise RuntimeError(f"No market data available for {command.symbol}")
-            
+
             # Simple logic: Buy uses Ask, Sell uses Bid
             # CRITICAL FIX: Prices now come as strings/Decimal from market feed to avoid float precision loss
             if command.order_type in [OrderType.BUY, OrderType.BUY_LIMIT, OrderType.BUY_STOP]:
                 execution_price = Decimal(tick['ask'])  # tick['ask'] is now str or Decimal
             else:
                 execution_price = Decimal(tick['bid'])  # tick['bid'] is now str or Decimal
-        
+
         price_obj = Price(execution_price)
         volume_obj = Volume(Decimal(str(command.volume)))
 
@@ -134,7 +134,7 @@ class CreateOrderHandler:
             symbol=symbol,
             current_price=price_obj
         )
-        
+
         if not is_approved:
             # Risk service already published Rejection event
             logger.warning(f"Order {ticket_id} rejected by risk service")

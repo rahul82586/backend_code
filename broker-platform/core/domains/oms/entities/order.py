@@ -28,7 +28,7 @@ class Order:
     """
     Represents Client Intent.
     Mutable until filled or cancelled.
-    
+
     Architectural Purpose:
     Captures the trader's order request. State transitions are enforced
     via business methods to prevent invalid state changes.
@@ -41,11 +41,11 @@ class Order:
     price: Optional[Price] = None  # Null for Market Orders
     stop_loss: Optional[Price] = None
     take_profit: Optional[Price] = None
-    
+
     state: OrderState = OrderState.NEW
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
-    
+
     filled_volume: Volume = field(default_factory=lambda: Volume(Decimal('0')))
     average_fill_price: Optional[Price] = None
 
@@ -64,13 +64,13 @@ class Order:
         """
         if self.filled_volume.value + volume.value > self.volume.value:
             raise ValueError("Fill volume exceeds order volume")
-        
+
         # Recalculate average price
-        current_val = (self.average_fill_price.value * self.filled_volume.value 
+        current_val = (self.average_fill_price.value * self.filled_volume.value
                       if self.average_fill_price else Decimal('0'))
         new_fill_val = price.value * volume.value
         new_vol = self.filled_volume.value + volume.value
-        
+
         self.average_fill_price = Price((current_val + new_fill_val) / new_vol)
         self.filled_volume = Volume(new_vol)
         self.updated_at = datetime.utcnow()

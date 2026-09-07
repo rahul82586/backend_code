@@ -1,7 +1,7 @@
 """
 Accounts Domain - The MT5 Core
 
-This domain handles Groups (as rule engines) and Accounts (Real, Demo, 
+This domain handles Groups (as rule engines) and Accounts (Real, Demo,
 Preliminary, Coverage, Contest, Manager, Dealer).
 
 The Group entity is the brain that dictates:
@@ -90,7 +90,7 @@ class GroupPermissions:
 class Group:
     """
     Group Entity - The Rule Engine
-    
+
     In MT5, a Group is not just a label; it's a comprehensive rule engine
     that controls all aspects of accounts assigned to it.
     """
@@ -98,34 +98,34 @@ class Group:
     name: str = ""
     type: str = "real"  # real, demo, preliminary, contest, coverage
     currency: str = "USD"
-    
+
     # Margin & Leverage
     leverage_default: int = 100
     leverage_max: int = 500
     margin_call_level: float = 0.8
     stop_out_level: float = 0.5
-    
+
     # Rules
     permissions: GroupPermissions = field(default_factory=GroupPermissions)
     commissions: List[CommissionRule] = field(default_factory=list)
     swaps: SwapConfiguration = field(default_factory=SwapConfiguration)
     routing: RoutingRule = field(default_factory=RoutingRule)
-    
+
     # Contest-specific (if applicable)
     contest_duration_days: Optional[int] = None
     virtual_balance: Optional[float] = None
-    
+
     # Metadata
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
     is_active: bool = True
-    
+
     def is_symbol_allowed(self, symbol: str) -> bool:
         """Check if a symbol is allowed for this group."""
         allowed = self.permissions.allowed_symbols
         if "*" in allowed:
             return True
-        
+
         for pattern in allowed:
             if pattern.endswith("*"):
                 prefix = pattern[:-1]
@@ -133,27 +133,27 @@ class Group:
                     return True
             elif symbol == pattern:
                 return True
-        
+
         return False
-    
-    def calculate_margin(self, symbol_config: Dict, volume: float, 
+
+    def calculate_margin(self, symbol_config: Dict, volume: float,
                          price: float) -> float:
         """Calculate required margin for a trade."""
         contract_size = symbol_config.get("contract_size", 100000)
         margin_percent = symbol_config.get("margins", {}).get(
             "initial_percent", 1.0
         )
-        
+
         # Apply group leverage
         effective_leverage = min(self.leverage_default, self.leverage_max)
         leverage_factor = 1.0 / effective_leverage
-        
+
         notional = volume * contract_size * price
         margin = notional * (margin_percent / 100.0) * leverage_factor
-        
+
         return margin
-    
-    def calculate_commission(self, symbol: str, volume: float, 
+
+    def calculate_commission(self, symbol: str, volume: float,
                              deal_value: float) -> float:
         """Calculate commission for a deal."""
         for rule in self.commissions:
@@ -165,7 +165,7 @@ class Group:
             elif rule.symbol_group != "*":
                 if symbol != rule.symbol_group:
                     continue
-            
+
             # Calculate based on type
             if rule.type == "per_lot":
                 commission = volume * rule.value
@@ -175,20 +175,20 @@ class Group:
                 commission = deal_value * rule.percent / 100.0
             else:
                 commission = 0.0
-            
+
             # Apply min/max limits
             commission = max(commission, rule.min_value)
             if rule.max_value is not None:
                 commission = min(commission, rule.max_value)
-            
+
             return commission
-        
+
         return 0.0
-    
+
     def can_trade(self) -> bool:
         """Check if accounts in this group can trade."""
         return self.permissions.trade_allowed and not self.permissions.view_only
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert group to dictionary."""
         return {
@@ -212,7 +212,7 @@ class Group:
                 "trade_allowed": self.permissions.trade_allowed,
                 "view_only": self.permissions.view_only,
                 "internal_only": self.permissions.internal_only,
-                "negative_balance_protection": 
+                "negative_balance_protection":
                     self.permissions.negative_balance_protection,
             },
             "commissions": [
@@ -248,7 +248,7 @@ class Group:
 class Account:
     """
     Account Entity
-    
+
     Represents a trading account assigned to a Group.
     The Group dictates all rules and permissions for this account.
     """
@@ -256,16 +256,16 @@ class Account:
     login: int = 0  # Unique login number
     password_hash: str = ""
     investor_password_hash: str = ""
-    
+
     # Identity
     email: str = ""
     phone: str = ""
     full_name: str = ""
-    
+
     # Group assignment (critical - defines all rules)
     group_id: str = ""
     group: Optional[Group] = None  # Loaded from repository
-    
+
     # Account state
     account_type: AccountType = AccountType.REAL
     currency: str = "USD"
@@ -274,53 +274,53 @@ class Account:
     margin: float = 0.0
     free_margin: float = 0.0
     margin_level: float = 0.0
-    
+
     # Leverage (can be overridden from group default)
     leverage: int = 100
-    
+
     # State flags
     is_enabled: bool = True
     is_online: bool = False
     last_login: Optional[datetime] = None
     registration_date: datetime = field(default_factory=datetime.utcnow)
-    
+
     # Color coding for dealer UI
     color_tag: Optional[str] = None  # e.g., "red" for toxic, "green" for VIP
-    
+
     # Dealer notes
     dealer_notes: str = ""
-    
+
     # Contest-specific
     contest_start: Optional[datetime] = None
     contest_end: Optional[datetime] = None
-    
+
     # Metadata
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
-    
+
     def update_equity(self, unrealized_pnl: float) -> None:
         """Update equity based on unrealized P&L."""
         self.equity = self.balance + unrealized_pnl
         self.free_margin = self.equity - self.margin
-        
+
         if self.margin > 0:
             self.margin_level = self.equity / self.margin
         else:
             self.margin_level = 0.0
-    
+
     def check_margin_call(self) -> bool:
         """Check if margin call level is reached."""
         if self.group and self.margin_level < self.group.margin_call_level:
             return True
         return False
-    
+
     def check_stop_out(self) -> bool:
         """Check if stop out level is reached."""
         if self.group and self.margin_level < self.group.stop_out_level:
             return True
         return False
-    
-    def can_open_position(self, symbol: str, volume: float, 
+
+    def can_open_position(self, symbol: str, volume: float,
                           required_margin: float) -> tuple:
         """
         Check if account can open a position.
@@ -328,24 +328,24 @@ class Account:
         """
         if not self.is_enabled:
             return False, "Account is disabled"
-        
+
         if not self.group:
             return False, "No group assigned"
-        
+
         if not self.group.can_trade():
             return False, "Trading not allowed for this account"
-        
+
         if not self.group.is_symbol_allowed(symbol):
             return False, f"Symbol {symbol} not allowed for this account"
-        
+
         if required_margin > self.free_margin:
             return False, "Insufficient free margin"
-        
+
         # Check max positions
         # (would need to query current positions count)
-        
+
         return True, "OK"
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert account to dictionary."""
         return {
@@ -370,9 +370,9 @@ class Account:
             "registration_date": self.registration_date.isoformat(),
             "color_tag": self.color_tag,
             "dealer_notes": self.dealer_notes,
-            "contest_start": self.contest_start.isoformat() 
+            "contest_start": self.contest_start.isoformat()
                 if self.contest_start else None,
-            "contest_end": self.contest_end.isoformat() 
+            "contest_end": self.contest_end.isoformat()
                 if self.contest_end else None,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),

@@ -17,25 +17,25 @@ class Symbol:
     """
     name: str
     path: str  # e.g., "Forex\EURUSD"
-    
+
     # Pricing
     tick_size: Decimal
     tick_value: Decimal
     contract_size: Decimal
     digits: int
-    
+
     # Limits
     volume_min: Decimal
     volume_max: Decimal
     volume_step: Decimal
-    
+
     # Margins
     margin_initial_percent: Decimal  # e.g., 3.33% for 1:30 leverage
     margin_maintenance_percent: Decimal
-    
+
     # Sessions
     sessions: List[TradingSession] = field(default_factory=list)
-    
+
     # Trading Mode
     is_trade_allowed: bool = True
     fill_mode: str = "FOK"  # FOK, IOC, Return

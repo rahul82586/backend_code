@@ -19,22 +19,22 @@ logger = logging.getLogger(__name__)
 class PreTradeRiskService:
     """
     Service responsible for pre-trade validation.
-    
+
     Architectural Purpose:
     Centralizes all risk checks required before an order can be accepted.
-    This prevents code duplication across different order entry points 
-    (API, FIX, Dealer Terminal) and ensures consistent enforcement of 
+    This prevents code duplication across different order entry points
+    (API, FIX, Dealer Terminal) and ensures consistent enforcement of
     Group rules and broker risk policies.
     """
-    
+
     def __init__(self, event_bus: IEventBus):
         self.event_bus = event_bus
 
     async def validate_order(
-        self, 
-        order: Order, 
-        account: Account, 
-        symbol: Symbol, 
+        self,
+        order: Order,
+        account: Account,
+        symbol: Symbol,
         current_price: Price
     ) -> bool:
         """
@@ -42,7 +42,7 @@ class PreTradeRiskService:
         Publishes OrderApproved or OrderRejected events accordingly.
         """
         logger.info(f"Running pre-trade checks for Order {order.ticket_id} on Account {account.login_id}")
-        
+
         # 1. Account State Check
         if not account.can_trade():
             reason = "Account is disabled or pending KYC verification"
@@ -102,10 +102,10 @@ class PreTradeRiskService:
         return True
 
     async def _check_margin_requirement(
-        self, 
-        order: Order, 
-        account: Account, 
-        symbol: Symbol, 
+        self,
+        order: Order,
+        account: Account,
+        symbol: Symbol,
         price: Price
     ) -> bool:
         """
@@ -113,17 +113,17 @@ class PreTradeRiskService:
         Formula: (Volume * ContractSize * Price) / Leverage
         """
         margin_required = symbol.calculate_margin_required(order.volume.value, price.value)
-        
+
         # Convert to Money object
         required_money = Money(margin_required, account.balance.currency)
-        
+
         if required_money.amount > account.margin_free.amount:
             logger.debug(
                 f"Margin check failed: Required {required_money.amount}, "
                 f"Available {account.margin_free.amount}"
             )
             return False
-        
+
         return True
 
     async def _publish_approval(self, order: Order) -> None:

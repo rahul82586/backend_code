@@ -5,6 +5,8 @@ Exposes client endpoints for order placement, modification, and cancellation.
 
 Architectural Rule: Invokes Application Command Handlers, zero direct DB access.
 """
+from decimal import Decimal
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.auth.dependencies import get_current_user

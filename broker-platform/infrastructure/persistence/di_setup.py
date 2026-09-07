@@ -12,7 +12,7 @@ from .event_store import SqlEventStore
 def setup_persistence_di(database_manager: DatabaseManager) -> dict:
     """Wire all repositories and return them as a dictionary for injection."""
     session_factory = database_manager.session_factory
-    
+
     # Initialize repositories in dependency order
     group_repo = SqlGroupRepository(session_factory)
     account_repo = SqlAccountRepository(session_factory, group_repo)
@@ -23,7 +23,7 @@ def setup_persistence_di(database_manager: DatabaseManager) -> dict:
     routing_rule_repo = SqlRoutingRuleRepository(session_factory)
     coverage_repo = SqlCoverageAccountRepository(session_factory)
     event_store = SqlEventStore(session_factory)
-    
+
     return {
         'group_repo': group_repo,
         'account_repo': account_repo,

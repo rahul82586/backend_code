@@ -1,7 +1,7 @@
 """Initial schema - all Phase 8 tables
 
 Revision ID: 001
-Revises: 
+Revises:
 Create Date: 2024-09-05
 
 """
@@ -42,7 +42,7 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.PrimaryKeyConstraint('name')
     )
-    
+
     # Create accounts table
     op.create_table('accounts',
         sa.Column('login', sa.String(length=32), nullable=False),
@@ -61,7 +61,7 @@ def upgrade() -> None:
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()),
         sa.PrimaryKeyConstraint('login')
     )
-    
+
     # Create symbols table
     op.create_table('symbols',
         sa.Column('name', sa.String(length=32), nullable=False),
@@ -81,7 +81,7 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.PrimaryKeyConstraint('name')
     )
-    
+
     # Create orders table
     op.create_table('orders',
         sa.Column('ticket_id', sa.String(length=32), nullable=False),
@@ -102,7 +102,7 @@ def upgrade() -> None:
     op.create_index('idx_orders_login', 'orders', ['account_login'])
     op.create_index('idx_orders_symbol', 'orders', ['symbol'])
     op.create_index('idx_orders_state', 'orders', ['state'])
-    
+
     # Create deals table
     op.create_table('deals',
         sa.Column('deal_id', sa.String(length=32), nullable=False),
@@ -124,7 +124,7 @@ def upgrade() -> None:
     op.create_index('idx_deals_login', 'deals', ['account_login'])
     op.create_index('idx_deals_order', 'deals', ['order_id'])
     op.create_index('idx_deals_symbol', 'deals', ['symbol'])
-    
+
     # Create positions table
     op.create_table('positions',
         sa.Column('id', sa.String(length=64), nullable=False),
@@ -142,7 +142,7 @@ def upgrade() -> None:
     )
     op.create_index('idx_positions_login', 'positions', ['account_login'])
     op.create_index('idx_positions_symbol', 'positions', ['symbol'])
-    
+
     # Create balance_operations table
     op.create_table('balance_operations',
         sa.Column('operation_id', sa.String(length=32), nullable=False),
@@ -159,7 +159,7 @@ def upgrade() -> None:
     op.create_index('idx_balance_ops_login', 'balance_operations', ['account_login'])
     op.create_index('idx_balance_ops_type', 'balance_operations', ['operation_type'])
     op.create_index('idx_balance_ops_reference', 'balance_operations', ['reference_id'])
-    
+
     # Create routing_rules table
     op.create_table('routing_rules',
         sa.Column('rule_id', sa.String(length=32), nullable=False),
@@ -175,7 +175,7 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.PrimaryKeyConstraint('rule_id')
     )
-    
+
     # Create coverage_accounts table
     op.create_table('coverage_accounts',
         sa.Column('account_id', sa.String(length=64), nullable=False),
@@ -188,7 +188,7 @@ def upgrade() -> None:
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()),
         sa.PrimaryKeyConstraint('account_id')
     )
-    
+
     # Create domain_events table
     op.create_table('domain_events',
         sa.Column('event_id', sa.String(length=64), nullable=False),

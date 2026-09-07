@@ -21,7 +21,7 @@ class Deal:
     Immutable Execution Record.
     Once created, this fact cannot change.
     Corrections require a new opposing Deal.
-    
+
     Architectural Purpose:
     Represents the atomic truth of what happened in the market.
     Used for ledger updates, audit trails, and position construction.
@@ -33,16 +33,16 @@ class Deal:
     deal_type: DealType
     volume: Volume
     price: Price
-    
+
     commission: Money
     swap: Money
     profit: Money = field(default_factory=lambda: Money(Decimal('0'), "USD"))
-    
+
     created_at: datetime = field(default_factory=datetime.utcnow)
-    
+
     # MT5 Correction Linkage
     # If this is a correction deal, links to the original deal being corrected
-    original_deal_id: Optional[str] = None 
+    original_deal_id: Optional[str] = None
     reason: Optional[str] = None
 
     def __post_init__(self):

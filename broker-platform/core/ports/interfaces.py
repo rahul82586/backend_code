@@ -210,8 +210,8 @@ class ICoverageAccountRepository(ABC, Generic[T]):
     ) -> None:
         """
         Updates net exposure for a symbol.
-        volume_delta > 0: Client bought (Broker sold).
-        volume_delta < 0: Client sold (Broker bought).
+        volume_delta > 0: Client sold (Broker bought).
+        volume_delta < 0: Client bought (Broker sold).
         """
         pass
 

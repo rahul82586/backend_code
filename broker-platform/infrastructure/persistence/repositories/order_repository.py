@@ -8,17 +8,17 @@ from ..db_models import OrderModel
 
 class SqlOrderRepository(IOrderRepository):
     """PostgreSQL implementation of IOrderRepository."""
-    
+
     def __init__(self, session_factory):
         self.session_factory = session_factory
-    
+
     async def save(self, order: Order) -> Order:
         async with self.session_factory() as session:
             model = order_to_db(order)
             await session.merge(model)
             await session.commit()
             return order
-    
+
     async def find_by_id(self, order_id: str) -> Optional[Order]:
         async with self.session_factory() as session:
             result = await session.execute(
@@ -28,7 +28,7 @@ class SqlOrderRepository(IOrderRepository):
             if not model:
                 return None
             return db_to_order(model)
-    
+
     async def find_active_orders_by_account(self, account_login: str) -> List[Order]:
         async with self.session_factory() as session:
             active_states = [s.value for s in [OrderState.NEW, OrderState.PLACED, OrderState.PARTIALLY_FILLED]]
@@ -40,7 +40,7 @@ class SqlOrderRepository(IOrderRepository):
             )
             models = result.scalars().all()
             return [db_to_order(m) for m in models]
-    
+
     async def get_next_ticket_id(self) -> str:
         # Simplified - in production use a sequence
         import uuid

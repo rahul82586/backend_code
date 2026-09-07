@@ -7,10 +7,10 @@ from ..db_models import RoutingRuleModel
 
 class SqlRoutingRuleRepository(IRoutingRuleRepository):
     """PostgreSQL implementation of IRoutingRuleRepository."""
-    
+
     def __init__(self, session_factory):
         self.session_factory = session_factory
-    
+
     async def get_active_rules(self) -> List[RoutingRule]:
         async with self.session_factory() as session:
             result = await session.execute(
@@ -20,14 +20,14 @@ class SqlRoutingRuleRepository(IRoutingRuleRepository):
             )
             models = result.scalars().all()
             return [db_to_routing_rule(m) for m in models]
-    
+
     async def save(self, rule: RoutingRule) -> RoutingRule:
         async with self.session_factory() as session:
             model = routing_rule_to_db(rule)
             await session.merge(model)
             await session.commit()
             return rule
-    
+
     async def find_by_id(self, rule_id: str) -> Optional[RoutingRule]:
         async with self.session_factory() as session:
             result = await session.execute(

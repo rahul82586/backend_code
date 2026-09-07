@@ -8,7 +8,7 @@ from core.domains.oms.entities.position import Position
 
 __all__ = [
     "Order",
-    "OrderType", 
+    "OrderType",
     "OrderState",
     "Deal",
     "DealType",
