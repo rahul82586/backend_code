@@ -48,6 +48,19 @@ class IEventBus(ABC):
         pass
 
 
+class IAccountRepository(ABC, Generic[T]):
+    """Contract for Account persistence."""
+    @abstractmethod
+    async def find_by_login(self, login_id: str) -> Optional[T]:
+        """Retrieves an account by its unique login ID."""
+        pass
+
+    @abstractmethod
+    async def save(self, account: T) -> T:
+        """Persists an account aggregate."""
+        pass
+
+
 class IOrderRepository(ABC, Generic[T]):
     """
     Contract for Order persistence.
