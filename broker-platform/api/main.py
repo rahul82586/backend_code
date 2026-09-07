@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.di_providers import register_di_providers
-from api.routers import account, auth, trade
+from api.routers import account, auth, trade, market_data
 from api.routers.admin import admin_router
 from api.websockets import endpoints as ws_endpoints
 from api.websockets.event_bridge import WebSocketEventBridge
@@ -42,7 +42,9 @@ def create_app(container: Optional[Dict[str, Any]] = None) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(trade.router)
     app.include_router(account.router)
+    app.include_router(market_data.router)
     app.include_router(admin_router.router)
+
 
     # Include WebSocket Routes
     app.include_router(ws_endpoints.router)
