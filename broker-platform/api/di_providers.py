@@ -107,3 +107,20 @@ def get_ip_whitelist() -> Any:
     """Provider for IIPWhitelist."""
     return _container.get("ip_whitelist")
 
+
+def get_historical_tick_repository() -> Any:
+    """Provider for IHistoricalTickRepository."""
+    repo = _container.get("historical_tick_repo")
+    if not repo:
+        raise RuntimeError("Historical tick repository not registered in DI container")
+    return repo
+
+
+def get_historical_bar_repository() -> Any:
+    """Provider for IHistoricalBarRepository."""
+    repo = _container.get("historical_bar_repo")
+    if not repo:
+        raise RuntimeError("Historical bar repository not registered in DI container")
+    return repo
+
+

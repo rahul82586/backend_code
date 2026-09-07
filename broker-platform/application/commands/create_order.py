@@ -170,3 +170,7 @@ class CreateOrderHandler:
         Helper to fetch symbol definition from the Instrument Repository.
         """
         return await self.instrument_repo.find_by_name(symbol_name)
+
+
+CreateOrderCommandHandler = CreateOrderHandler
+

@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Optional
+
 
 from core.domains.common.value_objects import Price, Volume, Money
 from core.domains.oms.entities.order import OrderType
