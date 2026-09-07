@@ -76,3 +76,34 @@ def get_positions_query_handler() -> Any:
     if not handler:
         raise RuntimeError("GetPositionsQueryHandler not registered in DI container")
     return handler
+
+
+def get_rate_limiter() -> Any:
+    """Provider for IRateLimiter."""
+    return _container.get("rate_limiter")
+
+
+def get_token_blacklist() -> Any:
+    """Provider for ITokenBlacklist."""
+    return _container.get("token_blacklist")
+
+
+def get_auth_service() -> Any:
+    """Provider for AuthService."""
+    return _container.get("auth_service")
+
+
+def get_manager_repo() -> Any:
+    """Provider for IManagerRepository."""
+    return _container.get("manager_repo")
+
+
+def get_totp_service() -> Any:
+    """Provider for ITwoFactorService."""
+    return _container.get("totp_service")
+
+
+def get_ip_whitelist() -> Any:
+    """Provider for IIPWhitelist."""
+    return _container.get("ip_whitelist")
+

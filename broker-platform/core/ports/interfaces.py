@@ -396,3 +396,64 @@ class ILedgerRepository(ABC):
     @abstractmethod
     async def get_by_reference(self, reference_id: str) -> Optional[T]: ...
 
+
+class IRateLimiter(ABC):
+    """Contract for rate limiting (sliding window)."""
+    @abstractmethod
+    async def is_allowed(self, key: str, limit: int, window_seconds: int) -> bool:
+        """Returns True if request within limit, False if rate limited."""
+        pass
+
+
+class ITwoFactorService(ABC):
+    """Contract for 2FA / TOTP authentication."""
+    @abstractmethod
+    def generate_secret(self) -> str:
+        """Generates a base32 TOTP secret key."""
+        pass
+
+    @abstractmethod
+    def get_provisioning_uri(self, secret: str, account_name: str, issuer_name: str = "BrokerPlatform") -> str:
+        """Returns otpauth:// URI for QR code generation."""
+        pass
+
+    @abstractmethod
+    def verify_code(self, secret: str, code: str) -> bool:
+        """Verifies a 6-digit TOTP code."""
+        pass
+
+
+class IIPWhitelist(ABC):
+    """Contract for CIDR IP Whitelisting."""
+    @abstractmethod
+    def is_allowed(self, client_ip: str, allowed_cidrs: List[str]) -> bool:
+        """Returns True if client_ip matches any CIDR or exact IP in allowed_cidrs."""
+        pass
+
+
+class ITokenBlacklist(ABC):
+    """Contract for JWT Token Blacklisting / Revocation."""
+    @abstractmethod
+    async def add(self, token: str, expires_at: datetime) -> None:
+        """Blacklists a token until expires_at."""
+        pass
+
+    @abstractmethod
+    async def is_blacklisted(self, token: str) -> bool:
+        """Returns True if token has been revoked."""
+        pass
+
+
+class IManagerRepository(ABC, Generic[T]):
+    """Contract for Manager Account persistence."""
+    @abstractmethod
+    async def find_by_login(self, login: str) -> Optional[T]:
+        """Retrieves a manager account by login."""
+        pass
+
+    @abstractmethod
+    async def save(self, manager: T) -> T:
+        """Persists a manager account."""
+        pass
+
+
