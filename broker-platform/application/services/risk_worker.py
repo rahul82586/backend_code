@@ -140,7 +140,7 @@ class RiskWorker:
                         # Select positions for liquidation (worst first)
                         positions_to_close = self.risk_engine.select_positions_for_liquidation(
                             positions=positions,
-                            target_margin_level=Decimal(str(account.group.margin.stop_out_level)),
+                            target_margin_level=Decimal(str(account.group.stop_out_level if account.group else '0.5')),
                             current_equity=snapshot.equity,
                             symbol_repo=self.risk_engine.symbol_repo,
                             market_feed=getattr(self.risk_engine, 'market_data_engine', getattr(self.risk_engine, 'market_feed', None))

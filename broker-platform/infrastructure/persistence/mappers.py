@@ -52,67 +52,69 @@ def db_to_account(model: AccountModel, group: Group) -> Account:
 # Group Mappers
 def group_to_db(group: Group) -> GroupModel:
     """Convert domain Group to database model."""
-    swap_enable = True
-    swap_type = "POINTS"
-    swap_long = Decimal('0')
-    swap_short = Decimal('0')
-    if hasattr(group, 'swap') and group.swap is not None:
-        swap_enable = getattr(group.swap, 'enable_swaps', True)
-        swap_type = getattr(group.swap, 'swap_type', "POINTS")
-        swap_long = getattr(group.swap, 'swap_long', Decimal('0'))
-        swap_short = getattr(group.swap, 'swap_short', Decimal('0'))
+    comm_rule = group.commissions[0] if group.commissions else None
+    comm_type = comm_rule.type if comm_rule else "per_lot"
+    comm_val = comm_rule.value if comm_rule else Decimal('0')
+    comm_curr = comm_rule.currency if comm_rule else "USD"
+
+    allowed_syms = group.permissions.allowed_symbols if group.permissions else ["*"]
+
     return GroupModel(
         name=group.name,
-        leverage=group.margin.leverage,
-        margin_call_level=group.margin.margin_call_level,
-        stop_out_level=group.margin.stop_out_level,
-        stop_out_mode=group.margin.stop_out_mode,
-        commission_type=group.commission.type,
-        commission_value=group.commission.value,
-        commission_currency=group.commission.currency,
-        execution_mode=group.execution.mode.value,
-        position_mode="HEDGING" if group.execution.allow_hedging else "NETTING",
-        allow_hedging=group.execution.allow_hedging,
-        allow_scalping=group.execution.allow_scalping,
-        slippage_points=group.execution.slippage_points,
-        permissions_json=json.dumps(group.permissions),
-        swap_enable=swap_enable,
-        swap_type=swap_type,
-        swap_long=swap_long,
-        swap_short=swap_short
+        leverage=group.leverage_default,
+        margin_call_level=group.margin_call_level,
+        stop_out_level=group.stop_out_level,
+        stop_out_mode="PERCENT",
+        commission_type=comm_type,
+        commission_value=comm_val,
+        commission_currency=comm_curr,
+        execution_mode="MARKET",
+        position_mode="HEDGING" if (group.permissions and group.permissions.allow_hedging) else "NETTING",
+        allow_hedging=group.permissions.allow_hedging if group.permissions else True,
+        allow_scalping=True,
+        slippage_points=0,
+        permissions_json=json.dumps(allowed_syms),
+        swap_enable=group.swaps.enable_swaps if group.swaps else True,
+        swap_type=group.swaps.swap_type if group.swaps else "POINTS",
+        swap_long=group.swaps.swap_long if group.swaps else Decimal('0'),
+        swap_short=group.swaps.swap_short if group.swaps else Decimal('0')
     )
 
 
 def db_to_group(model: GroupModel) -> Group:
     """Convert database model to domain Group."""
-    from core.domains.accounts.models import MarginProfile, CommissionProfile, ExecutionProfile
+    from core.domains.accounts.models import GroupPermissions, CommissionRule, SwapConfiguration
 
-    margin_profile = MarginProfile(
-        leverage=model.leverage,
-        margin_call_level=model.margin_call_level,
-        stop_out_level=model.stop_out_level,
-        stop_out_mode=model.stop_out_mode
+    comm_rule = CommissionRule(
+        type=model.commission_type or "per_lot",
+        value=Decimal(str(model.commission_value or 0)),
+        currency=model.commission_currency or "USD"
     )
 
-    commission_profile = CommissionProfile(
-        type=model.commission_type,
-        value=model.commission_value,
-        currency=model.commission_currency
+    swap_config = SwapConfiguration(
+        enable_swaps=model.swap_enable if model.swap_enable is not None else True,
+        swap_type=model.swap_type or "POINTS",
+        swap_long=Decimal(str(model.swap_long or 0)),
+        swap_short=Decimal(str(model.swap_short or 0))
     )
 
-    execution_profile = ExecutionProfile(
-        mode=ExecutionMode(model.execution_mode),
-        allow_hedging=model.allow_hedging,
-        allow_scalping=model.allow_scalping,
-        slippage_points=model.slippage_points
+    allowed_syms = json.loads(model.permissions_json or "[]")
+    if not isinstance(allowed_syms, list):
+        allowed_syms = ["*"]
+
+    permissions = GroupPermissions(
+        allowed_symbols=allowed_syms,
+        allow_hedging=model.allow_hedging if model.allow_hedging is not None else True
     )
 
     return Group(
         name=model.name,
-        margin=margin_profile,
-        commission=commission_profile,
-        execution=execution_profile,
-        permissions=json.loads(model.permissions_json or "{}")
+        leverage_default=model.leverage or 100,
+        margin_call_level=Decimal(str(model.margin_call_level or '0.8')),
+        stop_out_level=Decimal(str(model.stop_out_level or '0.5')),
+        commissions=[comm_rule],
+        swaps=swap_config,
+        permissions=permissions
     )
 
 

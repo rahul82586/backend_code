@@ -58,9 +58,17 @@ class MarketDataEngine:
     def _is_stale(self, tick: Tick) -> bool:
         """
         Quote filtration check for stale prices.
-        # TODO: Phase 11 - Implement configurable max tick age threshold per symbol group.
+        Rejects ticks older than 10.0 seconds.
         """
-        return False
+        if not tick or not tick.timestamp:
+            return True
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        tick_ts = tick.timestamp
+        if tick_ts.tzinfo is None:
+            tick_ts = tick_ts.replace(tzinfo=timezone.utc)
+        age = (now - tick_ts).total_seconds()
+        return age > 10.0
 
     def _is_noise(self, tick: Tick) -> bool:
         """

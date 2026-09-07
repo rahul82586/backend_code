@@ -60,8 +60,8 @@ class Volume:
     def __post_init__(self):
         if not isinstance(self.value, Decimal):
             object.__setattr__(self, 'value', Decimal(str(self.value)))
-        if self.value <= 0:
-            raise ValueError("Volume must be positive")
+        if self.value < 0:
+            raise ValueError("Volume cannot be negative")
 
     def is_valid_step(self, step: Decimal) -> bool:
         """Checks if volume aligns with symbol step (e.g., 0.01)"""
