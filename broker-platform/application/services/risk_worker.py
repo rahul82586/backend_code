@@ -143,7 +143,7 @@ class RiskWorker:
                             target_margin_level=Decimal(str(account.group.margin.stop_out_level)),
                             current_equity=snapshot.equity,
                             symbol_repo=self.risk_engine.symbol_repo,
-                            market_feed=self.risk_engine.market_feed
+                            market_feed=getattr(self.risk_engine, 'market_data_engine', getattr(self.risk_engine, 'market_feed', None))
                         )
                         
                         # Emit stop out event

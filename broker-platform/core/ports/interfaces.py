@@ -6,7 +6,7 @@ and external concerns (databases, message brokers, matching engines).
 Implementations live in the infrastructure layer and are injected at runtime.
 """
 from abc import ABC, abstractmethod
-from typing import List, Optional, TypeVar, Generic, Callable
+from typing import List, Optional, TypeVar, Generic, Callable, AsyncIterator
 from datetime import datetime
 
 from core.events.domain_events import DomainEvent
@@ -313,11 +313,8 @@ class ISymbolRepository(ABC, Generic[T]):
 
 class IMarketDataFeed(ABC):
     """
-    Contract for real-time market data access.
-    
-    Architectural Purpose:
-    Provides current bid/ask prices for margin and PnL calculations.
-    Abstracts the data source (Redis cache, direct feed, etc.).
+    [DEPRECATED in Phase 9] Contract for real-time market data access.
+    Note: Prefer using MarketDataEngine.get_latest_tick(symbol) directly for zero-latency in-memory tick lookup.
     """
     
     @abstractmethod
@@ -336,13 +333,53 @@ class IMarketDataFeed(ABC):
         pass
 
 
+class ITickFeed(ABC):
+    """Contract for an external or internal market data feed source."""
+    
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Name of the feed provider."""
+        pass
+    
+    @abstractmethod
+    def stream_ticks(self) -> AsyncIterator[T]:
+        """Stream continuous Tick objects."""
+        pass
+    
+    @abstractmethod
+    def stream_book(self, symbol: str) -> AsyncIterator[T]:
+        """Stream Depth of Market OrderBook snapshots for a symbol."""
+        pass
+
+
+class IBarRepository(ABC):
+    """Contract for persisting and querying OHLCV rate bars."""
+    
+    @abstractmethod
+    async def save_bar(self, bar: T) -> T:
+        """Persist a completed OHLCV bar."""
+        pass
+    
+    @abstractmethod
+    async def get_bars(self, symbol: str, timeframe: T, count: int = 100) -> List[T]:
+        """Retrieve recent historical bars for a symbol and timeframe."""
+        pass
+    
+    @abstractmethod
+    async def get_latest_bar(self, symbol: str, timeframe: T) -> Optional[T]:
+        """Retrieve the latest completed or running bar for a symbol and timeframe."""
+        pass
+
+
 class ILedgerRepository(ABC):
     """Contract for BalanceOperation persistence."""
     @abstractmethod
-    async def save(self, operation: BalanceOperation) -> BalanceOperation: ...
+    async def save(self, operation: T) -> T: ...
     
     @abstractmethod
-    async def get_by_account(self, account_login: str) -> List[BalanceOperation]: ...
+    async def get_by_account(self, account_login: str) -> List[T]: ...
     
     @abstractmethod
-    async def get_by_reference(self, reference_id: str) -> Optional[BalanceOperation]: ...
+    async def get_by_reference(self, reference_id: str) -> Optional[T]: ...
+
