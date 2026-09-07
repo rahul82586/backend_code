@@ -9,7 +9,7 @@ class Base(DeclarativeBase):
 
 class DatabaseManager:
     """Manages PostgreSQL async connections."""
-    
+
     def __init__(self, connection_string: str):
         self.engine = create_async_engine(
             connection_string,
@@ -24,11 +24,11 @@ class DatabaseManager:
             class_=AsyncSession,
             expire_on_commit=False
         )
-    
+
     async def create_tables(self):
         """Create all tables (for development). Use Alembic for production."""
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-    
+
     async def close(self):
         await self.engine.dispose()

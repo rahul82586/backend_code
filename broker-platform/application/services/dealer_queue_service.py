@@ -31,27 +31,27 @@ class DealerQueueService:
     2. Dealer sees it in queue → can CONFIRM, REJECT, or REQUOTE
     3. If no action within timeout → auto-reject or auto-confirm (configurable)
     """
-    
+
     def __init__(self, event_bus: IEventBus, order_repo: IOrderRepository):
         self.event_bus = event_bus
         self.order_repo = order_repo
-        
+
         # In-memory dealer queue: ticket_id -> Order
         self.queue: Dict[str, Order] = {}
-        
+
         # Locks: ticket_id -> lock_expiry_time
         self.locks: Dict[str, datetime] = {}
-        
+
         # Timeout tasks: ticket_id -> asyncio.Task (for cancellation)
         self.timeout_tasks: Dict[str, asyncio.Task] = {}
-        
+
         logger.info("DealerQueueService initialized")
 
     async def enqueue(self, order: Order, timeout_seconds: int = 30):
         """
         Lock order and add to dealer queue.
         Emits DealerInterventionRequiredEvent.
-        
+
         Args:
             order: The order requiring dealer intervention.
             timeout_seconds: Time before auto-reject (default 30s).
@@ -59,16 +59,16 @@ class DealerQueueService:
         if order.ticket_id in self.queue:
             logger.warning(f"Order {order.ticket_id} already in dealer queue")
             return
-        
+
         # Lock the order
         order.state = OrderState.PLACED  # Frozen state waiting for dealer
         self.queue[order.ticket_id] = order
         self.locks[order.ticket_id] = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
-        
+
         # Create timeout watcher task
         timeout_task = asyncio.create_task(self._watch_timeout(order.ticket_id, timeout_seconds))
         self.timeout_tasks[order.ticket_id] = timeout_task
-        
+
         # Emit event for UI notification
         event = DomainEvent(
             event_type=EventType.ORDER_QUEUED_FOR_DEALER,
@@ -82,15 +82,18 @@ class DealerQueueService:
             }
         )
         await self.event_bus.publish(event)
-        
+
         logger.info(f"Order {order.ticket_id} queued for dealer intervention")
-    
+
     async def _watch_timeout(self, ticket: str, timeout_seconds: int):
         """Background task to auto-reject if dealer doesn't respond."""
-        await asyncio.sleep(timeout_seconds)
-        if ticket in self.queue and ticket in self.locks:
-            logger.warning(f"Order {ticket} dealer timeout expired - auto-rejecting")
-            await self.dealer_reject(ticket, "SYSTEM", "Dealer response timeout")
+        try:
+            await asyncio.sleep(timeout_seconds)
+            if ticket in self.queue and ticket in self.locks:
+                logger.warning(f"Order {ticket} dealer timeout expired - auto-rejecting")
+                await self.dealer_reject(ticket, "SYSTEM", "Dealer response timeout")
+        except asyncio.CancelledError:
+            pass
 
     async def dealer_confirm(self, ticket: str, dealer_id: str) -> Order:
         """
@@ -100,15 +103,15 @@ class DealerQueueService:
         """
         if ticket not in self.queue:
             raise ValueError(f"Order {ticket} not found in dealer queue")
-        
+
         # Cancel timeout watcher
         if ticket in self.timeout_tasks:
             self.timeout_tasks[ticket].cancel()
             del self.timeout_tasks[ticket]
-        
+
         order = self.queue.pop(ticket)
         self.locks.pop(ticket, None)
-        
+
         # Emit confirmation event
         event = DomainEvent(
             event_type=EventType.ORDER_DEALER_CONFIRMED,
@@ -120,7 +123,7 @@ class DealerQueueService:
             }
         )
         await self.event_bus.publish(event)
-        
+
         logger.info(f"Dealer {dealer_id} confirmed order {ticket}")
         return order
 
@@ -132,16 +135,16 @@ class DealerQueueService:
         """
         if ticket not in self.queue:
             raise ValueError(f"Order {ticket} not found in dealer queue")
-        
+
         # Cancel timeout watcher
         if ticket in self.timeout_tasks:
             self.timeout_tasks[ticket].cancel()
             del self.timeout_tasks[ticket]
-        
+
         order = self.queue.pop(ticket)
         self.locks.pop(ticket, None)
         order.state = OrderState.REJECTED
-        
+
         # Emit rejection event
         event = DomainEvent(
             event_type=EventType.ORDER_REJECTED,
@@ -153,17 +156,17 @@ class DealerQueueService:
             }
         )
         await self.event_bus.publish(event)
-        
+
         # Persist rejection
         await self.order_repo.save(order)
-        
+
         logger.info(f"Dealer {dealer_id} rejected order {ticket}: {reason}")
         return order
 
     async def dealer_requote(
-        self, 
-        ticket: str, 
-        dealer_id: str, 
+        self,
+        ticket: str,
+        dealer_id: str,
         new_price: Decimal,
         reason: Optional[str] = None
     ) -> Order:
@@ -174,14 +177,14 @@ class DealerQueueService:
         """
         if ticket not in self.queue:
             raise ValueError(f"Order {ticket} not found in dealer queue")
-        
+
         # Cancel timeout watcher
         if ticket in self.timeout_tasks:
             self.timeout_tasks[ticket].cancel()
             del self.timeout_tasks[ticket]
-        
+
         order = self.queue[ticket]  # Keep in queue until client accepts
-        
+
         # Emit requote event
         event = DomainEvent(
             event_type=EventType.ORDER_REQUOTED,
@@ -194,7 +197,7 @@ class DealerQueueService:
             }
         )
         await self.event_bus.publish(event)
-        
+
         logger.info(f"Dealer {dealer_id} requoted order {ticket} at {new_price}")
         return order
 
@@ -205,7 +208,7 @@ class DealerQueueService:
         """
         now = datetime.now(timezone.utc)
         active_orders = []
-        
+
         for ticket, expiry in list(self.locks.items()):
             if now < expiry:
                 if ticket in self.queue:
@@ -214,7 +217,7 @@ class DealerQueueService:
                 # Timeout expired - could auto-reject here
                 logger.warning(f"Order {ticket} dealer timeout expired")
                 # Optional: await self.dealer_reject(ticket, "SYSTEM", "Timeout expired")
-        
+
         return active_orders
 
     async def check_timeouts(self):
@@ -228,6 +231,6 @@ class DealerQueueService:
             ticket for ticket, expiry in self.locks.items()
             if now >= expiry and ticket not in self.timeout_tasks  # Only check if no watcher task
         ]
-        
+
         for ticket in expired_tickets:
             await self.dealer_reject(ticket, "SYSTEM", "Dealer response timeout")

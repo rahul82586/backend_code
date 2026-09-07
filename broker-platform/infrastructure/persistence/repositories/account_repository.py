@@ -10,24 +10,24 @@ from infrastructure.persistence.mappers import account_to_db, db_to_account, gro
 
 class SqlGroupRepository(IGroupRepository):
     """PostgreSQL implementation of IGroupRepository."""
-    
+
     def __init__(self, session_factory):
         self.session_factory = session_factory
-    
+
     async def find_by_name(self, name: str) -> Optional[Group]:
         async with self.session_factory() as session:
             model = await session.get(GroupModel, name)
             if not model:
                 return None
             return db_to_group(model)
-    
+
     async def save(self, group: Group) -> Group:
         async with self.session_factory() as session:
             model = group_to_db(group)
             await session.merge(model)
             await session.commit()
             return group
-    
+
     async def get_all(self) -> List[Group]:
         async with self.session_factory() as session:
             result = await session.execute(select(GroupModel))
@@ -37,11 +37,11 @@ class SqlGroupRepository(IGroupRepository):
 
 class SqlAccountRepository(IAccountRepository):
     """PostgreSQL implementation of IAccountRepository."""
-    
+
     def __init__(self, session_factory, group_repo: IGroupRepository):
         self.session_factory = session_factory
         self.group_repo = group_repo
-    
+
     async def find_by_login(self, login_id: str) -> Optional[Account]:
         async with self.session_factory() as session:
             model = await session.get(AccountModel, login_id)
@@ -49,14 +49,14 @@ class SqlAccountRepository(IAccountRepository):
                 return None
             group = await self.group_repo.find_by_name(model.group_name)
             return db_to_account(model, group)
-    
+
     async def save(self, account: Account) -> Account:
         async with self.session_factory() as session:
             model = account_to_db(account)
             await session.merge(model)
             await session.commit()
             return account
-    
+
     async def get_all_accounts(self) -> List[Account]:
         async with self.session_factory() as session:
             result = await session.execute(select(AccountModel))
@@ -66,7 +66,7 @@ class SqlAccountRepository(IAccountRepository):
                 group = await self.group_repo.find_by_name(model.group_name)
                 accounts.append(db_to_account(model, group))
             return accounts
-    
+
     async def get_all_with_positions(self) -> List[str]:
         """Return login IDs of all accounts that have open positions."""
         from infrastructure.persistence.db_models import PositionModel

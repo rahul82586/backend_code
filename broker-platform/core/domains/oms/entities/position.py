@@ -18,37 +18,37 @@ class Position:
     """
     Aggregate Open State.
     Derived from the sequence of Deals (Buy/Sell) for a specific Symbol.
-    
+
     Architectural Purpose:
     Represents the trader's current exposure.
-    Supports both HEDGING (separate positions per direction) and 
+    Supports both HEDGING (separate positions per direction) and
     NETTING (aggregated volume) modes as defined by the Account's Group.
-    
+
     CRITICAL FIX: Includes contract_size for accurate PnL calculation.
     """
     id: str  # Usually "{account_login}:{symbol}:{side}" for Hedging
     account_login: str
     symbol: str
-    
+
     volume: Volume
     side: OrderType  # BUY or SELL
     average_price: Price
     contract_size: Decimal  # CRITICAL: Required for correct PnL math
-    
+
     unrealized_pnl: Money = field(default_factory=lambda: Money(Decimal('0'), "USD"))
     swap_accumulated: Money = field(default_factory=lambda: Money(Decimal('0'), "USD"))
-    
+
     opened_at: datetime = field(default_factory=datetime.utcnow)
     deal_count: int = 0  # Number of deals aggregated into this position
 
     def apply_deal(self, deal: Deal, position_mode: PositionMode = PositionMode.HEDGING) -> Optional['Position']:
         """
         Updates position state based on a new Deal.
-        
+
         Args:
             deal: The executed deal to apply
             position_mode: HEDGING creates new positions, NETTING aggregates
-            
+
         Returns:
             In HEDGING mode with opposite side: Returns NEW position (reversal)
             In NETTING mode: Updates self, returns None
@@ -58,7 +58,7 @@ class Position:
             return None  # Ignore non-trading deals
 
         deal_side = OrderType.BUY if deal.deal_type == DealType.BUY else OrderType.SELL
-        
+
         # HEDGING MODE: Every deal creates a new position or adds to same-direction only
         if position_mode == PositionMode.HEDGING:
             if deal_side != self.side:
@@ -69,7 +69,7 @@ class Position:
                 # Same direction = Add to existing position
                 self._add_to_position(deal)
                 return None
-        
+
         # NETTING MODE: Aggregate all deals
         else:
             if deal_side == self.side:
@@ -85,7 +85,7 @@ class Position:
         total_val = (self.average_price.value * self.volume.value) + \
                     (deal.price.value * deal.volume.value)
         new_vol = self.volume.value + deal.volume.value
-        
+
         self.volume = Volume(new_vol)
         self.average_price = Price(total_val / new_vol)
         self.deal_count += 1
@@ -100,13 +100,13 @@ class Position:
             self.volume = Volume(self.volume.value - deal.volume.value)
             self.deal_count += 1
             return None
-            
+
         elif deal.volume.value == self.volume.value:
             # Full Close
             self.volume = Volume(Decimal('0'))
             self.deal_count += 1
             return None
-            
+
         else:
             # Reverse: Close old, open new opposite
             new_vol = deal.volume.value - self.volume.value
@@ -129,7 +129,7 @@ class Position:
         Returns the new position object. Self remains unchanged.
         """
         deal_side = OrderType.BUY if deal.deal_type == DealType.BUY else OrderType.SELL
-        
+
         new_position = Position(
             id=f"{self.account_login}:{self.symbol}:{deal_side.value}",
             account_login=self.account_login,
@@ -146,7 +146,7 @@ class Position:
     def update_unrealized_pnl(self, current_market_price: Price):
         """
         Calculates current floating PnL.
-        
+
         CRITICAL FIX: Now includes contract_size in calculation.
         Formula: (CurrentPrice - AvgPrice) * Volume * ContractSize
         """
@@ -155,11 +155,11 @@ class Position:
             return
 
         diff = current_market_price.value - self.average_price.value
-        
+
         # For SELL positions, profit is when price goes down
         if self.side == OrderType.SELL:
             diff = -diff
-        
+
         # CORRECTED FORMULA: Include contract_size
         # Example: EURUSD, 1 lot (100k), 1 pip move (0.0001)
         # PnL = 0.0001 * 1 * 100000 = $10.00

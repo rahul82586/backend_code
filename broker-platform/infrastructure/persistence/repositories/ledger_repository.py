@@ -7,17 +7,17 @@ from ..db_models import BalanceOperationModel
 
 class SqlLedgerRepository(ILedgerRepository):
     """PostgreSQL implementation of ILedgerRepository."""
-    
+
     def __init__(self, session_factory):
         self.session_factory = session_factory
-    
+
     async def save(self, operation: BalanceOperation) -> BalanceOperation:
         async with self.session_factory() as session:
             model = balance_operation_to_db(operation)
             await session.merge(model)
             await session.commit()
             return operation
-    
+
     async def get_by_account(self, account_login: str) -> List[BalanceOperation]:
         async with self.session_factory() as session:
             result = await session.execute(
@@ -27,7 +27,7 @@ class SqlLedgerRepository(ILedgerRepository):
             )
             models = result.scalars().all()
             return [db_to_balance_operation(m) for m in models]
-    
+
     async def get_by_reference(self, reference_id: str) -> Optional[BalanceOperation]:
         async with self.session_factory() as session:
             result = await session.execute(

@@ -33,7 +33,7 @@ class RoutingRule:
     """
     Mirrors MT5 IMTConRoute. Evaluated in priority order (highest first).
     First matching rule wins.
-    
+
     Attributes:
         rule_id: Unique identifier for the rule.
         priority: Higher value = evaluated first.
@@ -49,13 +49,13 @@ class RoutingRule:
     rule_id: str
     priority: int
     destination: ExecutionDestination
-    
+
     # Filters (None = match all)
     group_filter: Optional[str] = None
     symbol_filter: Optional[str] = None
     volume_min: Optional[Decimal] = None
     volume_max: Optional[Decimal] = None
-    
+
     # Action details
     gateway_id: Optional[str] = None
     coverage_account_id: Optional[str] = None  # For B-Book: which coverage account to update
@@ -67,12 +67,12 @@ class CoverageAccount:
     """
     Mirrors Centroid 'Risk Account'. Tracks broker's net exposure
     from B-Book trades. Used for hedging decisions.
-    
+
     Attributes:
         account_id: Unique internal ID for the coverage account.
         name: Human-readable name (e.g., "EURUSD_Hedge_Account").
         currency: Account currency.
-        net_exposure: {symbol: net_volume}. 
+        net_exposure: {symbol: net_volume}.
             Positive = broker is long (clients are net short).
             Negative = broker is short (clients are net long).
         margin_level: Current margin level percentage.
@@ -81,21 +81,21 @@ class CoverageAccount:
     account_id: str
     name: str
     currency: str
-    
+
     # Net exposure per symbol: {symbol: net_volume}
     net_exposure: Dict[str, Decimal] = field(default_factory=dict)
-    
+
     margin_level: Decimal = Decimal('0')
     trading_state: str = "NEUTRAL"  # NEUTRAL, MARGIN_CALL, STOPPED_OUT
 
     def update_exposure(self, symbol: str, volume_delta: Decimal):
         """
         Updates net exposure for a symbol.
-        
+
         SIGN CONVENTION (CRITICAL):
         - volume_delta > 0: Client SOLD → Broker BOUGHT → Broker is LONG → exposure INCREASES (positive)
         - volume_delta < 0: Client BOUGHT → Broker SOLD → Broker is SHORT → exposure DECREASES (negative)
-        
+
         This matches the class docstring: Positive = broker is long (clients are net short).
         """
         current = self.net_exposure.get(symbol, Decimal('0'))

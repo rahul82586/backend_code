@@ -9,7 +9,7 @@ class LedgerEngine:
     Pure domain logic for double-entry bookkeeping.
     Every balance change must be recorded immutably.
     """
-    
+
     def __init__(self, ledger_repo: ILedgerRepository, account_repo: IAccountRepository):
         self.ledger_repo = ledger_repo
         self.account_repo = account_repo
@@ -29,10 +29,10 @@ class LedgerEngine:
         account = await self.account_repo.find_by_login(account_login)
         if not account:
             raise ValueError(f"Account {account_login} not found")
-        
+
         # Calculate new balance
         new_balance = account.balance + amount  # Money handles +/-
-        
+
         # Create immutable operation record
         operation = BalanceOperation(
             account_login=account_login,
@@ -42,12 +42,12 @@ class LedgerEngine:
             reference_id=reference_id,
             comment=comment
         )
-        
+
         # Persist operation
         await self.ledger_repo.save(operation)
-        
+
         # Update account balance
         account.balance = new_balance
         await self.account_repo.save(account)
-        
+
         return operation

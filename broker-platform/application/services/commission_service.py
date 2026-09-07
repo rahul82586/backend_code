@@ -16,7 +16,7 @@ class CommissionService:
     Calculates and applies commissions on every deal.
     Mirrors MT5 commission modes: per-lot, per-volume, percentage.
     """
-    
+
     def __init__(self, ledger_engine: LedgerEngine, event_bus: IEventBus):
         self.ledger_engine = ledger_engine
         self.event_bus = event_bus
@@ -28,7 +28,7 @@ class CommissionService:
         Returns the commission amount (always negative for client).
         """
         commission_profile = account.group.commission
-        
+
         # Calculate commission amount based on mode
         if commission_profile.type == "MONEY":
             # Fixed amount per deal
@@ -48,10 +48,10 @@ class CommissionService:
             )
         else:
             commission_amount = Money(Decimal('0'), "USD")
-        
+
         # Commission is always a charge (negative for client)
         commission_charge = Money(-commission_amount.amount, commission_amount.currency)
-        
+
         # Record in ledger
         operation = await self.ledger_engine.record_operation(
             account_login=account.login_id,
@@ -60,7 +60,7 @@ class CommissionService:
             reference_id=deal.deal_id,
             comment=f"Commission on deal {deal.deal_id}"
         )
-        
+
         # Emit event
         event = DomainEvent(
             event_type=EventType.COMMISSION_CHARGED,
@@ -73,7 +73,7 @@ class CommissionService:
             }
         )
         await self.event_bus.publish(event)
-        
+
         logger.info(f"Commission applied: {commission_charge.amount} {commission_charge.currency} for account {account.login_id}")
-        
+
         return commission_charge

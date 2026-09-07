@@ -14,16 +14,16 @@ from decimal import Decimal
 
 from core.domains.execution.router import SmartOrderRouter
 from core.domains.execution.models import (
-    ExecutionInstruction, 
-    ExecutionDestination, 
+    ExecutionInstruction,
+    ExecutionDestination,
     CoverageAccount
 )
 from core.domains.oms.entities.order import Order, OrderState
 from core.domains.accounts.models import Account
 from core.events.domain_events import DomainEvent, EventType
 from core.ports.interfaces import (
-    IEventBus, 
-    IOrderRepository, 
+    IEventBus,
+    IOrderRepository,
     IAccountRepository,
     ILiquidityGateway,
     IMatchingEngine,
@@ -38,7 +38,7 @@ class ExecutionOrchestrator:
     """
     The central conductor that receives OrderApprovedEvent and routes it
     to the correct execution destination.
-    
+
     Flow:
     OrderApprovedEvent → SmartOrderRouter → ExecutionInstruction
         → A_BOOK: ILiquidityGateway.send_order()
@@ -47,7 +47,7 @@ class ExecutionOrchestrator:
         → TO_DEALER: DealerQueueService.enqueue()
         → REJECT: Emit OrderRejectedEvent
     """
-    
+
     def __init__(
         self,
         router: SmartOrderRouter,
@@ -67,7 +67,7 @@ class ExecutionOrchestrator:
         self.order_repo = order_repo
         self.account_repo = account_repo
         self.coverage_repo = coverage_repo
-        
+
         logger.info("ExecutionOrchestrator initialized")
 
     async def handle_order_approved(self, event: DomainEvent):
@@ -79,21 +79,21 @@ class ExecutionOrchestrator:
         if not order_id:
             logger.error("OrderApprovedEvent missing order_id")
             return
-        
+
         # Fetch order and account
         order: Optional[Order] = await self.order_repo.find_by_id(order_id)
         if not order:
             logger.error(f"Order {order_id} not found")
             return
-        
+
         account: Optional[Account] = await self.account_repo.find_by_login(order.account_login)
         if not account:
             logger.error(f"Account {order.account_login} not found")
             return
-        
+
         # Route the order
         instruction = self.router.route(order, account)
-        
+
         # Emit routing event
         route_event = DomainEvent(
             event_type=EventType.ORDER_ROUTED,
@@ -106,7 +106,7 @@ class ExecutionOrchestrator:
             }
         )
         await self.event_bus.publish(route_event)
-        
+
         # Dispatch to appropriate handler
         if instruction.destination == ExecutionDestination.A_BOOK:
             await self._execute_a_book(order, instruction)
@@ -127,18 +127,18 @@ class ExecutionOrchestrator:
         Emits OrderRoutedEvent.
         """
         logger.info(f"Executing order {order.ticket_id} via A-Book gateway {instruction.gateway_id}")
-        
+
         try:
             # Send to external LP via FIX/REST gateway
             execution_report = await self.liquidity_gateway.send_order(
                 order=order,
                 gateway_id=instruction.gateway_id
             )
-            
+
             # Update order state
             order.state = OrderState.PLACED
             await self.order_repo.save(order)
-            
+
             # Emit success event
             event = DomainEvent(
                 event_type=EventType.ORDER_ROUTED,
@@ -150,7 +150,7 @@ class ExecutionOrchestrator:
                 }
             )
             await self.event_bus.publish(event)
-            
+
         except Exception as e:
             logger.error(f"A-Book execution failed for {order.ticket_id}: {e}")
             await self._reject_order(order, f"A-Book gateway error: {str(e)}")
@@ -160,19 +160,19 @@ class ExecutionOrchestrator:
         Internalize the trade (broker is counterparty).
         Creates an immutable Deal entity, updates client Position and Account margin,
         THEN updates CoverageAccount exposure.
-        
+
         SIGN CONVENTION (CRITICAL):
         - Client BUY → Broker SELL → volume_delta NEGATIVE (broker is SHORT)
         - Client SELL → Broker BUY → volume_delta POSITIVE (broker is LONG)
-        
+
         This matches CoverageAccount docstring: Positive = broker is long.
         """
         logger.info(f"Executing order {order.ticket_id} via B-Book (internal)")
-        
+
         try:
             # Execute internally (simulate fill at market price)
             fill_price = await self.matching_engine.execute_internal(order)
-            
+
             # Create immutable Deal entity
             from core.domains.oms.entities.deal import Deal, DealType
             deal = Deal(
@@ -180,42 +180,36 @@ class ExecutionOrchestrator:
                 order_id=order.ticket_id,
                 account_login=order.account_login,
                 symbol=order.symbol,
-                deal_type=DealType.BUY if order.order_type == OrderType.BUY else DealType.SELL,
+                deal_type=DealType.BUY if order.order_type.name.startswith("BUY") else DealType.SELL,
                 volume=order.volume,
                 price=fill_price,
                 commission=account.group.commission.value,  # Simplified
                 swap=Decimal('0'),  # Calculated separately in Ledger service
                 profit=Decimal('0')  # Realized PnL calculated on close
             )
-            
+
             # Apply deal to position and update account margin
             # This calls the RecordDealCommand logic
-            from application.commands.record_deal import RecordDealCommand, RecordDealCommandHandler
-            record_command = RecordDealCommand(
-                deal=deal,
-                account_login=order.account_login
-            )
-            # Note: In production, inject this handler via DI container
-            # For now, we call the logic directly
+            from application.commands.record_deal import RecordDealCommand, RecordDealHandler
             await self._apply_deal_to_account(deal, account)
-            
+
             # Update Coverage Account exposure with CORRECT sign convention
             # Client BUY → Negative delta (broker sold/short)
             # Client SELL → Positive delta (broker bought/long)
             is_buy = order.order_type.name.startswith("BUY")
             volume_delta = -order.volume.value if is_buy else order.volume.value
-            
+
             coverage_account_id = instruction.coverage_account_id or "DEFAULT_COVERAGE"
             await self.coverage_repo.update_exposure(
                 account_id=coverage_account_id,
                 symbol=order.symbol,
                 volume_delta=volume_delta
             )
-            
+
             # Update order state
             order.state = OrderState.FILLED
             await self.order_repo.save(order)
-            
+
             # Emit fill event
             event = DomainEvent(
                 event_type=EventType.DEAL_CREATED,
@@ -231,29 +225,50 @@ class ExecutionOrchestrator:
                 }
             )
             await self.event_bus.publish(event)
-            
+
         except Exception as e:
             logger.error(f"B-Book execution failed for {order.ticket_id}: {e}")
             await self._reject_order(order, f"B-Book internal error: {str(e)}")
-    
+
     async def _apply_deal_to_account(self, deal, account):
         """Helper to apply deal to account positions and recalculate margin."""
-        # In production, this delegates to RecordDealCommandHandler
-        # For now, simplified implementation
-        pass
+        from application.commands.record_deal import RecordDealCommand, RecordDealHandler
+        cmd = RecordDealCommand(
+            order_id=deal.order_id,
+            account_login=deal.account_login,
+            symbol=deal.symbol,
+            volume=deal.volume.value if hasattr(deal.volume, 'value') else deal.volume,
+            price=deal.price.value if hasattr(deal.price, 'value') else deal.price,
+            deal_type=deal.deal_type,
+            commission_amount=deal.commission.amount if hasattr(deal.commission, 'amount') else Decimal('0'),
+            swap_amount=deal.swap.amount if hasattr(deal.swap, 'amount') else Decimal('0'),
+            profit=deal.profit.amount if hasattr(deal.profit, 'amount') else Decimal('0'),
+        )
+        if hasattr(self, 'record_deal_handler') and self.record_deal_handler:
+            await self.record_deal_handler.execute(cmd)
+        elif hasattr(self, 'position_repo') and self.position_repo:
+            handler = RecordDealHandler(
+                order_repo=self.order_repo,
+                account_repo=self.account_repo,
+                position_repo=self.position_repo,
+                event_bus=self.event_bus,
+                symbol_repo=getattr(self, 'symbol_repo', None),
+                market_feed=getattr(self, 'market_feed', None)
+            )
+            await handler.execute(cmd)
 
     async def _execute_in_house(self, order: Order, instruction: ExecutionInstruction):
         """
         Submit to internal CLOB (Central Limit Order Book) for client-vs-client matching.
         """
         logger.info(f"Submitting order {order.ticket_id} to In-House ECN")
-        
+
         try:
             await self.matching_engine.submit_order(order)
-            
+
             order.state = OrderState.PLACED
             await self.order_repo.save(order)
-            
+
             event = DomainEvent(
                 event_type=EventType.ORDER_ROUTED,
                 aggregate_id=order.ticket_id,
@@ -264,7 +279,7 @@ class ExecutionOrchestrator:
                 }
             )
             await self.event_bus.publish(event)
-            
+
         except Exception as e:
             logger.error(f"In-House ECN submission failed for {order.ticket_id}: {e}")
             await self._reject_order(order, f"ECN error: {str(e)}")
@@ -274,13 +289,13 @@ class ExecutionOrchestrator:
         Route to dealer queue for manual confirmation.
         """
         logger.info(f"Sending order {order.ticket_id} to Dealer Queue")
-        
+
         try:
             await self.dealer_queue.enqueue(order, timeout_seconds=30)
-            
+
             # State updated in enqueue()
             await self.order_repo.save(order)
-            
+
         except Exception as e:
             logger.error(f"Dealer queue enrollment failed for {order.ticket_id}: {e}")
             await self._reject_order(order, f"Dealer queue error: {str(e)}")
@@ -291,7 +306,7 @@ class ExecutionOrchestrator:
         """
         order.state = OrderState.REJECTED
         await self.order_repo.save(order)
-        
+
         event = DomainEvent(
             event_type=EventType.ORDER_REJECTED,
             aggregate_id=order.ticket_id,
@@ -301,5 +316,5 @@ class ExecutionOrchestrator:
             }
         )
         await self.event_bus.publish(event)
-        
+
         logger.warning(f"Order {order.ticket_id} rejected: {reason}")

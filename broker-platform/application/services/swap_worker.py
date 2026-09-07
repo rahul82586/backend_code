@@ -10,9 +10,9 @@ from core.domains.ledger.models import BalanceOperationType
 from core.domains.ledger.engine import LedgerEngine
 from core.domains.common.value_objects import Money
 from core.ports.interfaces import (
-    IPositionRepository, 
-    IAccountRepository, 
-    ISymbolRepository, 
+    IPositionRepository,
+    IAccountRepository,
+    ISymbolRepository,
     IEventBus
 )
 from core.events.domain_events import DomainEvent, EventType
@@ -26,7 +26,7 @@ class SwapWorker:
     Calculates and applies swaps for all overnight positions.
     Mirrors MT5 swap modes: points, money, percent.
     """
-    
+
     def __init__(self,
                  ledger_engine: LedgerEngine,
                  position_repo: IPositionRepository,
@@ -46,13 +46,14 @@ class SwapWorker:
         """Main loop: wait for rollover time, then process all positions."""
         logger.info(f"SwapWorker started, rollover at {self.rollover_hour_utc}:00 UTC")
         self._running = True
+        _last_processed_date = None
         while self._running:
             now = datetime.now(timezone.utc)
-            if now.hour == self.rollover_hour_utc and now.minute == 0:
+            if now.hour == self.rollover_hour_utc and _last_processed_date != now.date():
                 logger.info("Rollover time reached, processing swaps...")
                 await self._process_swaps()
-                # Sleep 61 minutes to avoid double-processing
-                await asyncio.sleep(3660)
+                _last_processed_date = now.date()
+                await asyncio.sleep(60)
             else:
                 await asyncio.sleep(60)  # Check every minute
 
@@ -60,7 +61,7 @@ class SwapWorker:
         """Calculate and apply swaps for all open positions."""
         all_positions = await self.position_repo.get_open_positions()
         logger.info(f"Processing swaps for {len(all_positions)} positions")
-        
+
         for position in all_positions:
             try:
                 await self._apply_swap_for_position(position)
@@ -74,23 +75,23 @@ class SwapWorker:
         if not account:
             logger.warning(f"Account {position.account_login} not found for swap calculation")
             return
-        
+
         # Check if swaps are enabled for this group
         if not hasattr(account.group, 'swap') or not account.group.swap.enable_swaps:
             return
-        
+
         swap_profile = account.group.swap
         symbol = await self.symbol_repo.get_symbol(position.symbol)
         if not symbol:
             logger.warning(f"Symbol {position.symbol} not found for swap calculation")
             return
-        
+
         # Determine swap rate based on position side
         if position.side == OrderType.BUY:
             swap_rate = swap_profile.swap_long
         else:
             swap_rate = swap_profile.swap_short
-        
+
         # Calculate swap amount based on mode
         if swap_profile.swap_type == "POINTS":
             # Swap in points (e.g., -5 points per lot)
@@ -113,7 +114,7 @@ class SwapWorker:
             )
         else:
             swap_value = Money(Decimal('0'), account.balance.currency)
-        
+
         # Record in ledger
         operation = await self.ledger_engine.record_operation(
             account_login=position.account_login,
@@ -122,7 +123,7 @@ class SwapWorker:
             reference_id=position.id,
             comment=f"Swap on position {position.symbol}"
         )
-        
+
         # Emit event
         event = DomainEvent(
             event_type=EventType.SWAP_APPLIED,
@@ -136,7 +137,7 @@ class SwapWorker:
             }
         )
         await self.event_bus.publish(event)
-        
+
         logger.info(f"Swap applied: {swap_value.amount} {swap_value.currency} for position {position.id}")
 
     def stop(self):

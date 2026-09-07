@@ -10,7 +10,7 @@ from decimal import Decimal
 import json
 
 from infrastructure.persistence.db_models import (
-    AccountModel, GroupModel, SymbolModel, OrderModel, 
+    AccountModel, GroupModel, SymbolModel, OrderModel,
     DealModel, PositionModel, BalanceOperationModel,
     RoutingRuleModel, CoverageAccountModel
 )
@@ -52,6 +52,15 @@ def db_to_account(model: AccountModel, group: Group) -> Account:
 # Group Mappers
 def group_to_db(group: Group) -> GroupModel:
     """Convert domain Group to database model."""
+    swap_enable = True
+    swap_type = "POINTS"
+    swap_long = Decimal('0')
+    swap_short = Decimal('0')
+    if hasattr(group, 'swap') and group.swap is not None:
+        swap_enable = getattr(group.swap, 'enable_swaps', True)
+        swap_type = getattr(group.swap, 'swap_type', "POINTS")
+        swap_long = getattr(group.swap, 'swap_long', Decimal('0'))
+        swap_short = getattr(group.swap, 'swap_short', Decimal('0'))
     return GroupModel(
         name=group.name,
         leverage=group.margin.leverage,
@@ -67,36 +76,37 @@ def group_to_db(group: Group) -> GroupModel:
         allow_scalping=group.execution.allow_scalping,
         slippage_points=group.execution.slippage_points,
         permissions_json=json.dumps(group.permissions),
-        swap_enable=True,
-        swap_long=Decimal('0'),
-        swap_short=Decimal('0')
+        swap_enable=swap_enable,
+        swap_type=swap_type,
+        swap_long=swap_long,
+        swap_short=swap_short
     )
 
 
 def db_to_group(model: GroupModel) -> Group:
     """Convert database model to domain Group."""
     from core.domains.accounts.models import MarginProfile, CommissionProfile, ExecutionProfile
-    
+
     margin_profile = MarginProfile(
         leverage=model.leverage,
         margin_call_level=model.margin_call_level,
         stop_out_level=model.stop_out_level,
         stop_out_mode=model.stop_out_mode
     )
-    
+
     commission_profile = CommissionProfile(
         type=model.commission_type,
         value=model.commission_value,
         currency=model.commission_currency
     )
-    
+
     execution_profile = ExecutionProfile(
         mode=ExecutionMode(model.execution_mode),
         allow_hedging=model.allow_hedging,
         allow_scalping=model.allow_scalping,
         slippage_points=model.slippage_points
     )
-    
+
     return Group(
         name=model.name,
         margin=margin_profile,
@@ -227,11 +237,16 @@ def symbol_to_db(symbol: Symbol) -> SymbolModel:
 
 def db_to_symbol(model: SymbolModel) -> Symbol:
     from datetime import time
+    from core.domains.instruments.models import TradingSession
     sessions_data = json.loads(model.sessions_json or "[]")
     sessions = []
     for s in sessions_data:
-        sessions.append(None)  # Simplified - would need proper time parsing
-    
+        if isinstance(s, dict):
+            start_t = time.fromisoformat(s["start"]) if "start" in s and isinstance(s["start"], str) else time(0, 0)
+            end_t = time.fromisoformat(s["end"]) if "end" in s and isinstance(s["end"], str) else time(23, 59, 59)
+            day = s.get("day", 0)
+            sessions.append(TradingSession(start=start_t, end=end_t, day_of_week=day))
+
     return Symbol(
         name=model.name,
         path=model.path,
@@ -323,7 +338,7 @@ def coverage_account_to_db(account: CoverageAccount) -> CoverageAccountModel:
 def db_to_coverage_account(model: CoverageAccountModel) -> CoverageAccount:
     net_exposure_dict = json.loads(model.net_exposure_json or "{}")
     net_exposure = {k: Decimal(v) for k, v in net_exposure_dict.items()}
-    
+
     return CoverageAccount(
         account_id=model.account_id,
         name=model.name,
