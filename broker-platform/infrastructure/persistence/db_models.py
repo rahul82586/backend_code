@@ -199,3 +199,22 @@ class DomainEventModel(Base):
         Index("idx_events_type", "event_type"),
         Index("idx_events_aggregate", "aggregate_id"),
     )
+
+
+class BarModel(Base):
+    """Database model for aggregated OHLCV bars."""
+    __tablename__ = "bars"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(32), nullable=False, index=True)
+    timeframe = Column(String(10), nullable=False, index=True)
+    open = Column(Numeric(18, 8), nullable=False)
+    high = Column(Numeric(18, 8), nullable=False)
+    low = Column(Numeric(18, 8), nullable=False)
+    close = Column(Numeric(18, 8), nullable=False)
+    tick_volume = Column(Integer, nullable=False, default=0)
+    open_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    close_time = Column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (
+        Index("idx_bars_symbol_timeframe_time", "symbol", "timeframe", "open_time"),
+    )
+

@@ -13,17 +13,37 @@ class RiskEngine:
     Pure domain logic for risk calculations.
     
     Architectural Purpose:
-    Encapsulates all margin and stop-out logic. This class has NO dependencies
-    on infrastructure (DB, APIs) - it only uses ports for data retrieval.
+    Encapsulates all margin and stop-out logic. Uses MarketDataEngine or IMarketDataFeed
+    for current market price lookup.
     
     MT5 Compliance:
     - Margin Level = (Equity / Margin Used) × 100
     - Stop Out: Closes worst-loss positions first until margin recovers
     """
     
-    def __init__(self, symbol_repo: ISymbolRepository, market_feed: IMarketDataFeed):
+    def __init__(self, symbol_repo: ISymbolRepository, market_data_engine: Any):
         self.symbol_repo = symbol_repo
-        self.market_feed = market_feed
+        self.market_data_engine = market_data_engine
+
+    def _get_bid(self, symbol: str) -> Decimal:
+        """Helper to resolve bid price from MarketDataEngine or legacy feed."""
+        if hasattr(self.market_data_engine, 'get_latest_tick'):
+            tick = self.market_data_engine.get_latest_tick(symbol)
+            if tick:
+                return tick.bid
+        if hasattr(self.market_data_engine, 'get_bid'):
+            return self.market_data_engine.get_bid(symbol)
+        raise ValueError(f"No market data available for symbol {symbol}")
+
+    def _get_ask(self, symbol: str) -> Decimal:
+        """Helper to resolve ask price from MarketDataEngine or legacy feed."""
+        if hasattr(self.market_data_engine, 'get_latest_tick'):
+            tick = self.market_data_engine.get_latest_tick(symbol)
+            if tick:
+                return tick.ask
+        if hasattr(self.market_data_engine, 'get_ask'):
+            return self.market_data_engine.get_ask(symbol)
+        raise ValueError(f"No market data available for symbol {symbol}")
 
     def calculate_margin_level(self, account: Account, positions: List[Position]) -> MarginSnapshot:
         """
@@ -31,13 +51,6 @@ class RiskEngine:
         
         Formula: MarginLevel = (Equity / MarginUsed) × 100
         If MarginUsed == 0, return infinity (no risk).
-        
-        Args:
-            account: The account entity with balance and group rules
-            positions: List of open positions for this account
-            
-        Returns:
-            MarginSnapshot with current state and risk status
         """
         unrealized_pnl = Decimal('0')
         margin_used = Decimal('0')
@@ -48,11 +61,12 @@ class RiskEngine:
                 
                 # Get current market price based on position side
                 if position.side.name == "BUY":
-                    current_price = self.market_feed.get_bid(position.symbol)
+                    current_price = self._get_bid(position.symbol)
                     pnl_per_unit = current_price - position.average_price.value
                 else:  # SELL
-                    current_price = self.market_feed.get_ask(position.symbol)
+                    current_price = self._get_ask(position.symbol)
                     pnl_per_unit = position.average_price.value - current_price
+
                 
                 # PnL = price_diff * volume * contract_size
                 position_pnl = pnl_per_unit * position.volume.value * symbol_info.contract_size
@@ -147,11 +161,20 @@ class RiskEngine:
             try:
                 symbol_info = symbol_repo.get_symbol(position.symbol)
                 
+                feed = market_feed if market_feed is not None else self.market_data_engine
                 if position.side.name == "BUY":
-                    current_price = market_feed.get_bid(position.symbol)
+                    if hasattr(feed, 'get_latest_tick'):
+                        t = feed.get_latest_tick(position.symbol)
+                        current_price = t.bid if t else Decimal('0')
+                    else:
+                        current_price = feed.get_bid(position.symbol)
                     pnl = (current_price - position.average_price.value) * position.volume.value * symbol_info.contract_size
                 else:
-                    current_price = market_feed.get_ask(position.symbol)
+                    if hasattr(feed, 'get_latest_tick'):
+                        t = feed.get_latest_tick(position.symbol)
+                        current_price = t.ask if t else Decimal('0')
+                    else:
+                        current_price = feed.get_ask(position.symbol)
                     pnl = (position.average_price.value - current_price) * position.volume.value * symbol_info.contract_size
                 
                 positions_with_pnl.append((position, pnl))

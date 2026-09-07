@@ -51,6 +51,13 @@ class EventType(Enum):
     ORDER_REQUOTED = "execution.order_requoted"
     COVERAGE_EXPOSURE_UPDATED = "execution.coverage_exposure_updated"
 
+    # Ledger Events (Phase 7)
+    COMMISSION_CHARGED = "ledger.commission_charged"
+    SWAP_APPLIED = "ledger.swap_applied"
+    BALANCE_DEPOSITED = "ledger.balance_deposited"
+    BALANCE_WITHDRAWN = "ledger.balance_withdrawn"
+    BALANCE_CORRECTED = "ledger.balance_corrected"
+
 
 @dataclass(frozen=True)
 class DomainEvent:
@@ -158,6 +165,14 @@ class BookUpdated(DomainEvent):
     """Published when the order book (DOM) is updated."""
     event_type: EventType = field(default=EventType.BOOK_UPDATED, init=False)
     # Payload expects: symbol, bids_list, asks_list, sequence_number
+
+
+@dataclass(frozen=True)
+class BarAggregated(DomainEvent):
+    """Published when an OHLCV bar completed aggregation."""
+    event_type: EventType = field(default=EventType.BAR_AGGREGATED, init=False)
+    # Payload expects: symbol, timeframe, open, high, low, close, tick_volume, open_time
+
 
 
 # =============================================================================
