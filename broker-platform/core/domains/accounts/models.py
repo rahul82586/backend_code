@@ -11,10 +11,13 @@ The Group entity is the brain that dictates:
 - Routing rules (A-Book vs B-Book)
 """
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
+from decimal import Decimal
 from enum import Enum
 from typing import Any, Dict, List, Optional
 import uuid
+
+from core.domains.common.value_objects import Money
 
 
 class AccountType(Enum):
@@ -46,11 +49,11 @@ class CommissionRule:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     type: str = "per_lot"  # per_lot, per_deal, percent
     symbol_group: str = "*"  # Symbol pattern (e.g., "FOREX:*")
-    value: float = 0.0
+    value: Decimal = field(default_factory=lambda: Decimal('0'))
     currency: str = "USD"
-    percent: float = 0.0  # For percent-based commissions
-    min_value: float = 0.0
-    max_value: Optional[float] = None
+    percent: Decimal = field(default_factory=lambda: Decimal('0'))  # For percent-based commissions
+    min_value: Decimal = field(default_factory=lambda: Decimal('0'))
+    max_value: Optional[Decimal] = None
 
 
 @dataclass
@@ -59,13 +62,17 @@ class SwapConfiguration:
     calculation_mode: str = "points"  # points, percent, disabled
     rollover_time: str = "22:00"
     triple_swap_day: str = "Wednesday"  # Day for triple swap
+    enable_swaps: bool = True
+    swap_type: str = "POINTS"
+    swap_long: Decimal = field(default_factory=lambda: Decimal('0'))
+    swap_short: Decimal = field(default_factory=lambda: Decimal('0'))
 
 
 @dataclass
 class RoutingRule:
     """Routing rule for order execution."""
     default_mode: str = "b_book"  # a_book, b_book, in_house_ecn, internal_hedge, simulation, none
-    a_book_threshold_lots: Optional[float] = None
+    a_book_threshold_lots: Optional[Decimal] = None
     lp_priority: List[str] = field(default_factory=list)  # Priority list of LPs
 
 
@@ -102,8 +109,8 @@ class Group:
     # Margin & Leverage
     leverage_default: int = 100
     leverage_max: int = 500
-    margin_call_level: float = 0.8
-    stop_out_level: float = 0.5
+    margin_call_level: Decimal = field(default_factory=lambda: Decimal('0.8'))
+    stop_out_level: Decimal = field(default_factory=lambda: Decimal('0.5'))
 
     # Rules
     permissions: GroupPermissions = field(default_factory=GroupPermissions)
@@ -113,11 +120,11 @@ class Group:
 
     # Contest-specific (if applicable)
     contest_duration_days: Optional[int] = None
-    virtual_balance: Optional[float] = None
+    virtual_balance: Optional[Decimal] = None
 
     # Metadata
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     is_active: bool = True
 
     def is_symbol_allowed(self, symbol: str) -> bool:
@@ -136,26 +143,26 @@ class Group:
 
         return False
 
-    def calculate_margin(self, symbol_config: Dict, volume: float,
-                         price: float) -> float:
-        """Calculate required margin for a trade."""
-        contract_size = symbol_config.get("contract_size", 100000)
-        margin_percent = symbol_config.get("margins", {}).get(
+    def calculate_margin(self, symbol_config: Dict, volume: Decimal,
+                         price: Decimal) -> Decimal:
+        """Calculate required margin for a trade using Decimal precision."""
+        contract_size = Decimal(str(symbol_config.get("contract_size", 100000)))
+        margin_percent = Decimal(str(symbol_config.get("margins", {}).get(
             "initial_percent", 1.0
-        )
+        )))
 
         # Apply group leverage
-        effective_leverage = min(self.leverage_default, self.leverage_max)
-        leverage_factor = 1.0 / effective_leverage
+        effective_leverage = Decimal(str(min(self.leverage_default, self.leverage_max)))
+        leverage_factor = Decimal('1.0') / effective_leverage
 
         notional = volume * contract_size * price
-        margin = notional * (margin_percent / 100.0) * leverage_factor
+        margin = notional * (margin_percent / Decimal('100.0')) * leverage_factor
 
         return margin
 
-    def calculate_commission(self, symbol: str, volume: float,
-                             deal_value: float) -> float:
-        """Calculate commission for a deal."""
+    def calculate_commission(self, symbol: str, volume: Decimal,
+                             deal_value: Decimal) -> Decimal:
+        """Calculate commission for a deal using Decimal arithmetic."""
         for rule in self.commissions:
             # Check if symbol matches pattern
             if rule.symbol_group.endswith("*"):
@@ -170,11 +177,11 @@ class Group:
             if rule.type == "per_lot":
                 commission = volume * rule.value
             elif rule.type == "per_deal":
-                commission = rule.value + (deal_value * rule.percent / 100.0)
+                commission = rule.value + (deal_value * rule.percent / Decimal('100.0'))
             elif rule.type == "percent":
-                commission = deal_value * rule.percent / 100.0
+                commission = deal_value * rule.percent / Decimal('100.0')
             else:
-                commission = 0.0
+                commission = Decimal('0')
 
             # Apply min/max limits
             commission = max(commission, rule.min_value)
@@ -183,7 +190,7 @@ class Group:
 
             return commission
 
-        return 0.0
+        return Decimal('0')
 
     def can_trade(self) -> bool:
         """Check if accounts in this group can trade."""
@@ -198,8 +205,8 @@ class Group:
             "currency": self.currency,
             "leverage_default": self.leverage_default,
             "leverage_max": self.leverage_max,
-            "margin_call_level": self.margin_call_level,
-            "stop_out_level": self.stop_out_level,
+            "margin_call_level": float(self.margin_call_level),
+            "stop_out_level": float(self.stop_out_level),
             "permissions": {
                 "allowed_symbols": self.permissions.allowed_symbols,
                 "max_positions": self.permissions.max_positions,
@@ -220,9 +227,9 @@ class Group:
                     "id": c.id,
                     "type": c.type,
                     "symbol_group": c.symbol_group,
-                    "value": c.value,
+                    "value": float(c.value),
                     "currency": c.currency,
-                    "percent": c.percent,
+                    "percent": float(c.percent),
                 }
                 for c in self.commissions
             ],
@@ -233,11 +240,11 @@ class Group:
             },
             "routing": {
                 "default_mode": self.routing.default_mode,
-                "a_book_threshold_lots": self.routing.a_book_threshold_lots,
+                "a_book_threshold_lots": float(self.routing.a_book_threshold_lots) if self.routing.a_book_threshold_lots else None,
                 "lp_priority": self.routing.lp_priority,
             },
             "contest_duration_days": self.contest_duration_days,
-            "virtual_balance": self.virtual_balance,
+            "virtual_balance": float(self.virtual_balance) if self.virtual_balance else None,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "is_active": self.is_active,
@@ -266,14 +273,14 @@ class Account:
     group_id: str = ""
     group: Optional[Group] = None  # Loaded from repository
 
-    # Account state
+    # Account state - using Money value objects for financial amounts
     account_type: AccountType = AccountType.REAL
     currency: str = "USD"
-    balance: float = 0.0
-    equity: float = 0.0
-    margin: float = 0.0
-    free_margin: float = 0.0
-    margin_level: float = 0.0
+    balance: Money = field(default_factory=lambda: Money(Decimal('0'), "USD"))
+    equity: Money = field(default_factory=lambda: Money(Decimal('0'), "USD"))
+    margin_used: Money = field(default_factory=lambda: Money(Decimal('0'), "USD"))
+    margin_free: Money = field(default_factory=lambda: Money(Decimal('0'), "USD"))
+    margin_level: Decimal = field(default_factory=lambda: Decimal('0'))
 
     # Leverage (can be overridden from group default)
     leverage: int = 100
@@ -282,7 +289,7 @@ class Account:
     is_enabled: bool = True
     is_online: bool = False
     last_login: Optional[datetime] = None
-    registration_date: datetime = field(default_factory=datetime.utcnow)
+    registration_date: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Color coding for dealer UI
     color_tag: Optional[str] = None  # e.g., "red" for toxic, "green" for VIP
@@ -295,18 +302,44 @@ class Account:
     contest_end: Optional[datetime] = None
 
     # Metadata
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
-    def update_equity(self, unrealized_pnl: float) -> None:
+    def can_trade(self) -> bool:
+        """Check if account is enabled and assigned group allows trading."""
+        if not self.is_enabled:
+            return False
+        if self.group and not self.group.can_trade():
+            return False
+        return True
+
+    @property
+    def margin(self) -> Money:
+        """Alias for margin_used for backwards compatibility."""
+        return self.margin_used
+
+    @margin.setter
+    def margin(self, val: Money) -> None:
+        self.margin_used = val
+
+    @property
+    def free_margin(self) -> Money:
+        """Alias for margin_free for backwards compatibility."""
+        return self.margin_free
+
+    @free_margin.setter
+    def free_margin(self, val: Money) -> None:
+        self.margin_free = val
+
+    def update_equity(self, unrealized_pnl: Money) -> None:
         """Update equity based on unrealized P&L."""
-        self.equity = self.balance + unrealized_pnl
-        self.free_margin = self.equity - self.margin
+        self.equity = Money(self.balance.amount + unrealized_pnl.amount, self.currency)
+        self.margin_free = Money(self.equity.amount - self.margin_used.amount, self.currency)
 
-        if self.margin > 0:
-            self.margin_level = self.equity / self.margin
+        if self.margin_used.amount > Decimal('0'):
+            self.margin_level = self.equity.amount / self.margin_used.amount
         else:
-            self.margin_level = 0.0
+            self.margin_level = Decimal('0')
 
     def check_margin_call(self) -> bool:
         """Check if margin call level is reached."""
@@ -320,8 +353,8 @@ class Account:
             return True
         return False
 
-    def can_open_position(self, symbol: str, volume: float,
-                          required_margin: float) -> tuple:
+    def can_open_position(self, symbol: str, volume: Decimal,
+                          required_margin: Money) -> tuple:
         """
         Check if account can open a position.
         Returns (can_open: bool, reason: str)
@@ -338,11 +371,8 @@ class Account:
         if not self.group.is_symbol_allowed(symbol):
             return False, f"Symbol {symbol} not allowed for this account"
 
-        if required_margin > self.free_margin:
+        if required_margin.amount > self.margin_free.amount:
             return False, "Insufficient free margin"
-
-        # Check max positions
-        # (would need to query current positions count)
 
         return True, "OK"
 
@@ -358,11 +388,11 @@ class Account:
             "group_name": self.group.name if self.group else None,
             "account_type": self.account_type.value,
             "currency": self.currency,
-            "balance": self.balance,
-            "equity": self.equity,
-            "margin": self.margin,
-            "free_margin": self.free_margin,
-            "margin_level": self.margin_level,
+            "balance": float(self.balance.amount),
+            "equity": float(self.equity.amount),
+            "margin": float(self.margin_used.amount),
+            "free_margin": float(self.margin_free.amount),
+            "margin_level": float(self.margin_level),
             "leverage": self.leverage,
             "is_enabled": self.is_enabled,
             "is_online": self.is_online,
@@ -377,3 +407,4 @@ class Account:
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
+

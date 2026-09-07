@@ -77,17 +77,17 @@ class SwapWorker:
             return
 
         # Check if swaps are enabled for this group
-        if not hasattr(account.group, 'swap') or not account.group.swap.enable_swaps:
+        swap_profile = getattr(account.group, 'swaps', getattr(account.group, 'swap', None))
+        if not swap_profile or not getattr(swap_profile, 'enable_swaps', True):
             return
 
-        swap_profile = account.group.swap
         symbol = await self.symbol_repo.get_symbol(position.symbol)
         if not symbol:
             logger.warning(f"Symbol {position.symbol} not found for swap calculation")
             return
 
         # Determine swap rate based on position side
-        if position.side == OrderType.BUY:
+        if position.side == OrderType.BUY or (hasattr(position.side, 'name') and position.side.name == "BUY"):
             swap_rate = swap_profile.swap_long
         else:
             swap_rate = swap_profile.swap_short

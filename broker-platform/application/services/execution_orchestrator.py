@@ -57,7 +57,11 @@ class ExecutionOrchestrator:
         event_bus: IEventBus,
         order_repo: IOrderRepository,
         account_repo: IAccountRepository,
-        coverage_repo: ICoverageAccountRepository
+        coverage_repo: ICoverageAccountRepository,
+        position_repo: Optional[Any] = None,
+        symbol_repo: Optional[Any] = None,
+        market_feed: Optional[Any] = None,
+        record_deal_handler: Optional[Any] = None
     ):
         self.router = router
         self.dealer_queue = dealer_queue
@@ -67,6 +71,10 @@ class ExecutionOrchestrator:
         self.order_repo = order_repo
         self.account_repo = account_repo
         self.coverage_repo = coverage_repo
+        self.position_repo = position_repo
+        self.symbol_repo = symbol_repo
+        self.market_feed = market_feed
+        self.record_deal_handler = record_deal_handler
 
         logger.info("ExecutionOrchestrator initialized")
 
