@@ -8,6 +8,7 @@ Implementations live in the infrastructure layer and are injected at runtime.
 from abc import ABC, abstractmethod
 from typing import List, Optional, TypeVar, Generic, Callable, AsyncIterator
 from datetime import datetime
+from decimal import Decimal
 
 from core.events.domain_events import DomainEvent
 
@@ -131,7 +132,7 @@ class IMatchingEngine(ABC, Generic[T]):
         pass
 
     @abstractmethod
-    async def modify_order(self, order_id: str, new_price: float, new_quantity: int) -> bool:
+    async def modify_order(self, order_id: str, new_price: Decimal, new_quantity: int) -> bool:
         """
         Modifies an existing order (Price/Quantity).
         In strict FIFO engines, this might be implemented as Cancel+Replace.
