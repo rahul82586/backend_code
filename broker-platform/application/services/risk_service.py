@@ -5,7 +5,7 @@ Encapsulates all margin, permission, and account state checks.
 import asyncio
 import logging
 from decimal import Decimal
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from core.domains.accounts.models import Account, Group
 from core.domains.instruments.models import Symbol
@@ -28,13 +28,17 @@ class PreTradeRiskService:
 
     def __init__(
         self,
-        event_bus: IEventBus,
+        event_bus: Optional[IEventBus] = None,
         position_repo: Optional[IPositionRepository] = None,
-        risk_engine: Optional[Any] = None
+        risk_engine: Optional[Any] = None,
+        symbol_repo: Optional[Any] = None,
+        account_repo: Optional[Any] = None
     ):
         self.event_bus = event_bus
         self.position_repo = position_repo
         self.risk_engine = risk_engine
+        self.symbol_repo = symbol_repo
+        self.account_repo = account_repo
         self._account_locks: Dict[str, asyncio.Lock] = {}
 
     def get_account_lock(self, account_login: str) -> asyncio.Lock:
@@ -56,30 +60,41 @@ class PreTradeRiskService:
     ) -> bool:
         """
         Performs all pre-trade checks under per-account lock protection.
+        Uses 'async with' to guarantee lock release even if an exception occurs.
         Returns True if approved, False if rejected.
         """
-        login_key = str(getattr(account, 'login', getattr(account, 'id', 'default')))
-        lock = self.get_account_lock(login_key)
+        account_login = str(getattr(account, 'login', getattr(account, 'login_id', getattr(account, 'id', 'default'))))
+        lock = self.get_account_lock(account_login)
 
+        # CRITICAL: Use 'async with' to guarantee lock release on exception
         async with lock:
+            logger.info(f"Running pre-trade checks under lock for Order {order.ticket_id} on Account {account_login}")
 
-            logger.info(f"Running pre-trade checks for Order {order.ticket_id} on Account {login_key}")
+            # 1. Fetch LIVE account state if account_repo is available
+            live_account = account
+            if self.account_repo:
+                try:
+                    fetched = await self.account_repo.find_by_login(account_login)
+                    if fetched:
+                        live_account = fetched
+                except Exception as e:
+                    logger.warning(f"Could not refresh live account state for {account_login}: {e}")
 
-            # 1. Account State Check
-            if not account.can_trade():
+            # 2. Account State Check
+            if not live_account.can_trade():
                 reason = "Account is disabled or pending KYC verification"
                 logger.warning(f"Order {order.ticket_id} rejected: {reason}")
                 await self._publish_rejection(order, reason)
                 return False
 
-            # 2. Symbol Permission Check (Group Rules)
-            if not self._check_symbol_permission(account.group, symbol.name):
-                reason = f"Symbol {symbol.name} is not allowed for Group {account.group.name if account.group else 'Unknown'}"
+            # 3. Symbol Permission Check (Group Rules)
+            if not self._check_symbol_permission(live_account.group, symbol.name):
+                reason = f"Symbol {symbol.name} is not allowed for Group {live_account.group.name if live_account.group else 'Unknown'}"
                 logger.warning(f"Order {order.ticket_id} rejected: {reason}")
                 await self._publish_rejection(order, reason)
                 return False
 
-            # 3. Trading Session Check
+            # 4. Trading Session Check
             from datetime import datetime, timezone
             current_time = datetime.now(timezone.utc).time()
             if not symbol.is_within_session(current_time):
@@ -88,21 +103,21 @@ class PreTradeRiskService:
                 await self._publish_rejection(order, reason)
                 return False
 
-            # 4. Volume Limits Check
+            # 5. Volume Limits Check
             if not self._check_volume_limits(order.volume, symbol):
                 reason = f"Volume {order.volume.value} exceeds limits for {symbol.name} (Min: {symbol.volume_min}, Max: {symbol.volume_max})"
                 logger.warning(f"Order {order.ticket_id} rejected: {reason}")
                 await self._publish_rejection(order, reason)
                 return False
 
-            # 5. Live Margin Check
-            if not await self._check_margin_requirement(order, account, symbol, current_price):
+            # 6. Live Margin Requirement Check
+            if not await self._check_margin_requirement(order, live_account, symbol, current_price):
                 reason = "Insufficient free margin to open this position"
                 logger.warning(f"Order {order.ticket_id} rejected: {reason}")
                 await self._publish_rejection(order, reason)
                 return False
 
-            # All checks passed
+            # All checks passed under lock protection
             logger.info(f"Order {order.ticket_id} approved by Pre-Trade Risk Service")
             await self._publish_approval(order)
             return True
@@ -154,6 +169,8 @@ class PreTradeRiskService:
 
     async def _publish_approval(self, order: Order) -> None:
         """Publishes OrderApprovedEvent."""
+        if not self.event_bus:
+            return
         event = OrderApproved(
             aggregate_id=order.ticket_id,
             payload={
@@ -168,6 +185,8 @@ class PreTradeRiskService:
 
     async def _publish_rejection(self, order: Order, reason: str) -> None:
         """Publishes OrderRejectedEvent."""
+        if not self.event_bus:
+            return
         event = OrderRejected(
             aggregate_id=order.ticket_id,
             payload={
@@ -178,4 +197,3 @@ class PreTradeRiskService:
             }
         )
         await self.event_bus.publish(event)
-

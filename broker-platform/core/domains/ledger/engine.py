@@ -32,6 +32,8 @@ class LedgerEngine:
 
         # Calculate new balance
         new_balance = account.balance + amount  # Money handles +/-
+        if operation_type == BalanceOperationType.WITHDRAWAL and new_balance.amount < Decimal('0'):
+            raise ValueError(f"Insufficient funds for withdrawal on account {account_login}: available balance {account.balance.amount}, attempted {abs(amount.amount)}")
 
         # Create immutable operation record
         operation = BalanceOperation(
