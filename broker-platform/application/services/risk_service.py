@@ -51,6 +51,18 @@ class PreTradeRiskService:
             self._account_locks[login_key] = asyncio.Lock()
         return self._account_locks[login_key]
 
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def account_lock(self, account_login: str):
+        """
+        Async context manager providing per-account locking.
+        Usage: async with risk_service.account_lock(account_login): ...
+        """
+        lock = self.get_account_lock(account_login)
+        async with lock:
+            yield lock
+
     async def validate_order(
         self,
         order: Order,

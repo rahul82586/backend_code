@@ -9,19 +9,29 @@ from ..db_models import OrderModel
 class SqlOrderRepository(IOrderRepository):
     """PostgreSQL implementation of IOrderRepository."""
 
-    def __init__(self, session_factory):
+    def __init__(self, session_factory=None):
         self.session_factory = session_factory
 
-    async def save(self, order: Order) -> Order:
-        async with self.session_factory() as session:
-            model = order_to_db(order)
+    async def save(self, order: Order, session: Optional[AsyncSession] = None) -> Order:
+        model = order_to_db(order)
+        if session is not None:
             await session.merge(model)
-            await session.commit()
+            return order
+        async with self.session_factory() as sess:
+            await sess.merge(model)
+            await sess.commit()
             return order
 
-    async def find_by_id(self, order_id: str) -> Optional[Order]:
-        async with self.session_factory() as session:
+    async def find_by_id(self, order_id: str, session: Optional[AsyncSession] = None) -> Optional[Order]:
+        if session is not None:
             result = await session.execute(
+                select(OrderModel).where(OrderModel.ticket_id == order_id)
+            )
+            model = result.scalar_one_or_none()
+            return db_to_order(model) if model else None
+
+        async with self.session_factory() as sess:
+            result = await sess.execute(
                 select(OrderModel).where(OrderModel.ticket_id == order_id)
             )
             model = result.scalar_one_or_none()
