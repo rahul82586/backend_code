@@ -127,24 +127,26 @@ class CreateOrderHandler:
             updated_at=datetime.now(timezone.utc)
         )
 
-        # 5. Pre-Trade Risk Check (The Gatekeeper)
-        is_approved = await self.risk_service.validate_order(
-            order=order,
-            account=account,
-            symbol=symbol,
-            current_price=price_obj
-        )
+        # 5. Pre-Trade Risk Check (The Gatekeeper) wrapped in per-account lock
+        login_id_int = int(command.account_login) if str(command.account_login).isdigit() else hash(command.account_login)
+        async with self.risk_service.account_lock(login_id_int):
+            is_approved = await self.risk_service.validate_order(
+                order=order,
+                account=account,
+                symbol=symbol,
+                current_price=price_obj
+            )
 
-        if not is_approved:
-            # Risk service already published Rejection event
-            logger.warning(f"Order {ticket_id} rejected by risk service")
-            raise PermissionError("Order rejected by pre-trade risk checks")
+            if not is_approved:
+                # Risk service already published Rejection event
+                logger.warning(f"Order {ticket_id} rejected by risk service")
+                raise PermissionError("Order rejected by pre-trade risk checks")
 
-        # 6. Persist Order
-        # State changes to PLACED upon successful save
-        order.state = OrderState.PLACED
-        saved_order = await self.order_repo.save(order)
-        logger.info(f"Order {saved_order.ticket_id} persisted successfully")
+            # 6. Persist Order
+            # State changes to PLACED upon successful save
+            order.state = OrderState.PLACED
+            saved_order = await self.order_repo.save(order)
+            logger.info(f"Order {saved_order.ticket_id} persisted successfully")
 
         # 7. Publish Domain Event
         # This triggers downstream processes: Matching Engine, Dealer UI, Analytics

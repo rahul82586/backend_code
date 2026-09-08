@@ -321,6 +321,11 @@ class Account:
         return True
 
     @property
+    def login_id(self) -> str:
+        """String representation of login number."""
+        return str(self.login)
+
+    @property
     def margin(self) -> Money:
         """Alias for margin_used for backwards compatibility."""
         return self.margin_used

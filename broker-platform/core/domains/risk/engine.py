@@ -18,6 +18,11 @@ class StaleQuoteError(ValueError):
     pass
 
 
+class CurrencyConversionError(Exception):
+    """Raised when an exchange rate for converting quote_currency to account_currency is missing."""
+    pass
+
+
 class RiskEngine:
     """
     Pure domain logic for risk calculations.
@@ -31,17 +36,75 @@ class RiskEngine:
     - Stop Out: Closes worst-loss positions first until margin recovers
     """
 
-    def __init__(self, symbol_repo: ISymbolRepository, market_data_engine: Optional[Any] = None):
+    def __init__(self, symbol_repo: Optional[ISymbolRepository] = None, market_data_engine: Optional[Any] = None):
         self.symbol_repo = symbol_repo
         self.market_data_engine = market_data_engine
+
+    def get_conversion_rate(
+        self,
+        quote_currency: str,
+        account_currency: str,
+        market_feed: Optional[Any] = None
+    ) -> Decimal:
+        """
+        Retrieves exchange rate to convert amounts in quote_currency to account_currency.
+        Raises CurrencyConversionError if rate is missing.
+        """
+        if not quote_currency or not account_currency or quote_currency == account_currency:
+            return Decimal('1.0')
+
+        feed = market_feed or self.market_data_engine
+        if not feed:
+            raise CurrencyConversionError(
+                f"Missing exchange rate for {quote_currency} -> {account_currency}: Market feed unavailable"
+            )
+
+        # 1. Try direct pair e.g. JPYUSD
+        direct_symbol = f"{quote_currency}{account_currency}"
+        try:
+            if hasattr(feed, 'get_latest_tick'):
+                tick = feed.get_latest_tick(direct_symbol)
+                if tick:
+                    rate = Decimal(str(tick['bid'] if isinstance(tick, dict) and 'bid' in tick else getattr(tick, 'bid', 0)))
+                    if rate > Decimal('0'):
+                        return rate
+            elif hasattr(feed, 'get_bid'):
+                bid = feed.get_bid(direct_symbol)
+                if bid:
+                    return Decimal(str(bid))
+        except Exception:
+            pass
+
+        # 2. Try inverse pair e.g. USDJPY
+        inverse_symbol = f"{account_currency}{quote_currency}"
+        try:
+            if hasattr(feed, 'get_latest_tick'):
+                tick = feed.get_latest_tick(inverse_symbol)
+                if tick:
+                    ask_price = Decimal(str(tick['ask'] if isinstance(tick, dict) and 'ask' in tick else getattr(tick, 'ask', 0)))
+                    if ask_price > Decimal('0'):
+                        return Decimal('1.0') / ask_price
+            elif hasattr(feed, 'get_ask'):
+                ask = feed.get_ask(inverse_symbol)
+                if ask:
+                    return Decimal('1.0') / Decimal(str(ask))
+        except Exception:
+            pass
+
+        raise CurrencyConversionError(
+            f"Missing exchange rate for {quote_currency} -> {account_currency}"
+        )
 
     def _verify_tick_freshness(self, symbol: str, tick: Any) -> None:
         """Ensures tick data is non-null and not older than MAX_QUOTE_AGE_SECONDS."""
         if tick is None:
             raise ValueError(f"No market tick available for symbol {symbol}")
         
+        tick_ts = getattr(tick, 'timestamp', None) if not isinstance(tick, dict) else tick.get('timestamp')
+        if tick_ts is None:
+            return
+
         now = datetime.now(timezone.utc)
-        tick_ts = tick.timestamp
         if tick_ts.tzinfo is None:
             tick_ts = tick_ts.replace(tzinfo=timezone.utc)
 
@@ -57,7 +120,7 @@ class RiskEngine:
             tick = self.market_data_engine.get_latest_tick(symbol)
             if tick:
                 self._verify_tick_freshness(symbol, tick)
-                return Decimal(str(tick.bid))
+                return Decimal(str(tick['bid'] if isinstance(tick, dict) else tick.bid))
         if hasattr(self.market_data_engine, 'get_bid'):
             return Decimal(str(self.market_data_engine.get_bid(symbol)))
         raise ValueError(f"No market data available for symbol {symbol}")
@@ -68,21 +131,16 @@ class RiskEngine:
             tick = self.market_data_engine.get_latest_tick(symbol)
             if tick:
                 self._verify_tick_freshness(symbol, tick)
-                return Decimal(str(tick.ask))
+                return Decimal(str(tick['ask'] if isinstance(tick, dict) else tick.ask))
         if hasattr(self.market_data_engine, 'get_ask'):
             return Decimal(str(self.market_data_engine.get_ask(symbol)))
-        raise ValueError(f"No market data available for symbol {symbol}")
-
     def calculate_margin_level(self, account: Account, positions: List[Position]) -> MarginSnapshot:
         """
         Calculate real-time margin level for an account (Layer 1: Fast local RAM estimate).
-
-        Formula: MarginLevel = (Equity / MarginUsed) × 100
-        If MarginUsed == 0, return infinity / 999999 (no risk).
+        Formula: MarginLevel = (Equity / MarginUsed) * 100
         """
         unrealized_pnl = Decimal('0')
         margin_used = Decimal('0')
-        has_calculation_error = False
 
         effective_leverage = Decimal(str(account.leverage if account.leverage and account.leverage > 0 else (account.group.leverage_default if account.group else 100)))
         if effective_leverage <= Decimal('0'):
@@ -154,8 +212,7 @@ class RiskEngine:
             return False
         margin_call_level = Decimal(str(account.group.margin_call_level))
         return snapshot.margin_level < margin_call_level
-
-    def detect_stop_out(self, account: Account, snapshot: MarginSnapshot) -> bool:
+    def detect_stop_out(self, account: Account, snapshot: MarginSnapshot) -> bool:
         """Check if account has breached stop-out threshold."""
         if not account.group:
             return False
@@ -164,9 +221,8 @@ class RiskEngine:
 
     def select_positions_for_liquidation(
         self,
+        account: Account,
         positions: List[Position],
-        target_margin_level: Decimal = Decimal('1.0'),
-        current_equity: Decimal = Decimal('0'),
         symbol_repo: Optional[ISymbolRepository] = None,
         market_feed: Optional[IMarketDataFeed] = None
     ) -> List[Position]:
@@ -181,27 +237,33 @@ class RiskEngine:
 
         for position in positions:
             try:
-                symbol_info = active_symbol_repo.get_symbol(position.symbol) if active_symbol_repo else None
-                contract_size = Decimal(str(symbol_info.contract_size)) if symbol_info else position.contract_size
+                symbol_info = active_symbol_repo.find_by_name(position.symbol) if (active_symbol_repo and hasattr(active_symbol_repo, 'find_by_name')) else (active_symbol_repo.get_symbol(position.symbol) if active_symbol_repo else None)
+                contract_size = Decimal(str(getattr(symbol_info, 'contract_size', 100000)))
+
+                quote_curr = getattr(symbol_info, 'quote_currency', 'USD') if symbol_info else 'USD'
+                conv_rate = self.get_conversion_rate(quote_curr, account.currency, market_feed=active_feed)
 
                 if position.side.name == "BUY":
                     if hasattr(active_feed, 'get_latest_tick'):
                         t = active_feed.get_latest_tick(position.symbol)
                         self._verify_tick_freshness(position.symbol, t)
-                        current_price = Decimal(str(t.bid))
+                        current_price = Decimal(str(t['bid'] if isinstance(t, dict) and 'bid' in t else getattr(t, 'bid', 0)))
                     else:
                         current_price = Decimal(str(active_feed.get_bid(position.symbol)))
-                    pnl = (current_price - position.average_price.value) * position.volume.value * contract_size
+                    raw_pnl = (current_price - position.average_price.value) * position.volume.value * contract_size
                 else:
                     if hasattr(active_feed, 'get_latest_tick'):
                         t = active_feed.get_latest_tick(position.symbol)
                         self._verify_tick_freshness(position.symbol, t)
-                        current_price = Decimal(str(t.ask))
+                        current_price = Decimal(str(t['ask'] if isinstance(t, dict) and 'ask' in t else getattr(t, 'ask', 0)))
                     else:
                         current_price = Decimal(str(active_feed.get_ask(position.symbol)))
-                    pnl = (position.average_price.value - current_price) * position.volume.value * contract_size
+                    raw_pnl = (position.average_price.value - current_price) * position.volume.value * contract_size
 
+                pnl = raw_pnl * conv_rate
                 positions_with_pnl.append((position, pnl))
+            except CurrencyConversionError:
+                raise
             except Exception as e:
                 logger.error(f"Error calculating liquidation PnL for position {position.id}: {e}")
                 continue
@@ -210,5 +272,3 @@ class RiskEngine:
         positions_with_pnl.sort(key=lambda x: x[1])
 
         return [pos for pos, pnl in positions_with_pnl]
-
-

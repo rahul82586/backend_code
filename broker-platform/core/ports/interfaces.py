@@ -105,6 +105,33 @@ class IOrderRepository(ABC, Generic[T]):
         pass
 
 
+class IDealRepository(ABC, Generic[T]):
+    """
+    Contract for Deal persistence.
+    Deals are immutable execution records (append-only log).
+    """
+
+    @abstractmethod
+    async def save(self, deal: T, session: Optional[Any] = None) -> T:
+        """Persists an immutable deal entity."""
+        pass
+
+    @abstractmethod
+    async def find_by_id(self, deal_id: str) -> Optional[T]:
+        """Retrieves a deal by its unique identifier."""
+        pass
+
+    @abstractmethod
+    async def find_by_order_id(self, order_id: str) -> List[T]:
+        """Retrieves all deals associated with a given order."""
+        pass
+
+    @abstractmethod
+    async def find_by_account(self, account_login: str) -> List[T]:
+        """Retrieves all deals executed for a specific account."""
+        pass
+
+
 class IMatchingEngine(ABC, Generic[T]):
     """
     Contract for the core trading logic.

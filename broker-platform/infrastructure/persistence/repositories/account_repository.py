@@ -38,23 +38,33 @@ class SqlGroupRepository(IGroupRepository):
 class SqlAccountRepository(IAccountRepository):
     """PostgreSQL implementation of IAccountRepository."""
 
-    def __init__(self, session_factory, group_repo: IGroupRepository):
+    def __init__(self, session_factory=None, group_repo: Optional[IGroupRepository] = None):
         self.session_factory = session_factory
         self.group_repo = group_repo
 
-    async def find_by_login(self, login_id: str) -> Optional[Account]:
-        async with self.session_factory() as session:
+    async def find_by_login(self, login_id: str, session: Optional[AsyncSession] = None) -> Optional[Account]:
+        if session is not None:
             model = await session.get(AccountModel, login_id)
             if not model:
                 return None
-            group = await self.group_repo.find_by_name(model.group_name)
+            group = await self.group_repo.find_by_name(model.group_name) if self.group_repo else None
             return db_to_account(model, group)
 
-    async def save(self, account: Account) -> Account:
-        async with self.session_factory() as session:
-            model = account_to_db(account)
+        async with self.session_factory() as sess:
+            model = await sess.get(AccountModel, login_id)
+            if not model:
+                return None
+            group = await self.group_repo.find_by_name(model.group_name) if self.group_repo else None
+            return db_to_account(model, group)
+
+    async def save(self, account: Account, session: Optional[AsyncSession] = None) -> Account:
+        model = account_to_db(account)
+        if session is not None:
             await session.merge(model)
-            await session.commit()
+            return account
+        async with self.session_factory() as sess:
+            await sess.merge(model)
+            await sess.commit()
             return account
 
     async def get_all_accounts(self) -> List[Account]:
