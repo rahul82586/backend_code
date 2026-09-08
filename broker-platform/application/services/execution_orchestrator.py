@@ -99,8 +99,17 @@ class ExecutionOrchestrator:
             logger.error(f"Account {order.account_login} not found")
             return
 
+        # Fetch coverage account for NOP threshold evaluation if available
+        coverage_account = None
+        if self.coverage_repo:
+            try:
+                coverage_account = await self.coverage_repo.find_by_id("DEFAULT_COVERAGE")
+            except Exception as e:
+                logger.debug(f"Could not load coverage account for routing: {e}")
+
         # Route the order
-        instruction = self.router.route(order, account)
+        instruction = self.router.route(order, account, coverage_account=coverage_account)
+
 
         # Emit routing event
         route_event = DomainEvent(
