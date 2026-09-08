@@ -75,21 +75,23 @@ class RiskEngine:
 
     def calculate_margin_level(self, account: Account, positions: List[Position]) -> MarginSnapshot:
         """
-        Calculate real-time margin level for an account.
+        Calculate real-time margin level for an account (Layer 1: Fast local RAM estimate).
 
         Formula: MarginLevel = (Equity / MarginUsed) × 100
-        If MarginUsed == 0, return infinity (no risk).
+        If MarginUsed == 0, return infinity / 999999 (no risk).
         """
         unrealized_pnl = Decimal('0')
         margin_used = Decimal('0')
         has_calculation_error = False
 
-        effective_leverage = Decimal(str(account.leverage if account.leverage > 0 else account.group.leverage_default))
+        effective_leverage = Decimal(str(account.leverage if account.leverage and account.leverage > 0 else (account.group.leverage_default if account.group else 100)))
+        if effective_leverage <= Decimal('0'):
+            effective_leverage = Decimal('1.0')
 
         for position in positions:
             try:
                 symbol_info = self.symbol_repo.get_symbol(position.symbol)
-                contract_size = Decimal(str(symbol_info.contract_size))
+                contract_size = Decimal(str(getattr(symbol_info, 'contract_size', 100000)))
 
                 # Get current market price based on position side
                 if position.side.name == "BUY":
@@ -99,22 +101,22 @@ class RiskEngine:
                     current_price = self._get_ask(position.symbol)
                     pnl_per_unit = position.average_price.value - current_price
 
-                # PnL = price_diff * volume * contract_size
+                # Position PnL = price_diff * volume * contract_size
                 position_pnl = pnl_per_unit * position.volume.value * contract_size
                 unrealized_pnl += position_pnl
 
-                # Margin = (Price * Volume * ContractSize) / Leverage
+                # Position Margin = (price * volume * contract_size) / leverage
                 margin_for_position = (current_price * position.volume.value * contract_size) / effective_leverage
                 margin_used += margin_for_position
 
             except Exception as e:
-                logger.error(f"Error calculating margin for position {position.id} on account {account.login}: {e}", exc_info=True)
+                logger.error(f"Error calculating margin for position {position.id} on account {getattr(account, 'login', account.id)}: {e}", exc_info=True)
                 has_calculation_error = True
 
         equity = account.balance.amount + unrealized_pnl
         margin_free = equity - margin_used
 
-        # Calculate margin level
+        # Calculate margin level with safe division
         if margin_used <= Decimal('0'):
             margin_level = Decimal('999999')
             status = RiskStatus.BLOCKED if has_calculation_error else RiskStatus.NORMAL
@@ -122,8 +124,8 @@ class RiskEngine:
             margin_level = (equity / margin_used) * Decimal('100')
 
             # Determine risk status based on Group rules
-            margin_call_level = Decimal(str(account.group.margin_call_level if account.group else '0.8'))
-            stop_out_level = Decimal(str(account.group.stop_out_level if account.group else '0.5'))
+            margin_call_level = Decimal(str(account.group.margin_call_level if account.group and hasattr(account.group, 'margin_call_level') else '0.8'))
+            stop_out_level = Decimal(str(account.group.stop_out_level if account.group and hasattr(account.group, 'stop_out_level') else '0.5'))
 
             if has_calculation_error:
                 status = RiskStatus.BLOCKED
@@ -163,40 +165,40 @@ class RiskEngine:
     def select_positions_for_liquidation(
         self,
         positions: List[Position],
-        target_margin_level: Decimal,
-        current_equity: Decimal,
-        symbol_repo: ISymbolRepository,
-        market_feed: IMarketDataFeed
+        target_margin_level: Decimal = Decimal('1.0'),
+        current_equity: Decimal = Decimal('0'),
+        symbol_repo: Optional[ISymbolRepository] = None,
+        market_feed: Optional[IMarketDataFeed] = None
     ) -> List[Position]:
         """
         Select positions to close during Stop Out.
 
-        MT5 behavior: Close worst-loss positions first until margin level
-        recovers above stop_out_level.
+        MT5 behavior: Close worst-loss positions first until margin level recovers.
         """
+        active_symbol_repo = symbol_repo or self.symbol_repo
+        active_feed = market_feed or self.market_data_engine
         positions_with_pnl = []
 
         for position in positions:
             try:
-                symbol_info = symbol_repo.get_symbol(position.symbol)
-                contract_size = Decimal(str(symbol_info.contract_size))
+                symbol_info = active_symbol_repo.get_symbol(position.symbol) if active_symbol_repo else None
+                contract_size = Decimal(str(symbol_info.contract_size)) if symbol_info else position.contract_size
 
-                feed = market_feed if market_feed is not None else self.market_data_engine
                 if position.side.name == "BUY":
-                    if hasattr(feed, 'get_latest_tick'):
-                        t = feed.get_latest_tick(position.symbol)
+                    if hasattr(active_feed, 'get_latest_tick'):
+                        t = active_feed.get_latest_tick(position.symbol)
                         self._verify_tick_freshness(position.symbol, t)
                         current_price = Decimal(str(t.bid))
                     else:
-                        current_price = Decimal(str(feed.get_bid(position.symbol)))
+                        current_price = Decimal(str(active_feed.get_bid(position.symbol)))
                     pnl = (current_price - position.average_price.value) * position.volume.value * contract_size
                 else:
-                    if hasattr(feed, 'get_latest_tick'):
-                        t = feed.get_latest_tick(position.symbol)
+                    if hasattr(active_feed, 'get_latest_tick'):
+                        t = active_feed.get_latest_tick(position.symbol)
                         self._verify_tick_freshness(position.symbol, t)
                         current_price = Decimal(str(t.ask))
                     else:
-                        current_price = Decimal(str(feed.get_ask(position.symbol)))
+                        current_price = Decimal(str(active_feed.get_ask(position.symbol)))
                     pnl = (position.average_price.value - current_price) * position.volume.value * contract_size
 
                 positions_with_pnl.append((position, pnl))
@@ -207,6 +209,6 @@ class RiskEngine:
         # Sort by PnL ascending (worst losses first)
         positions_with_pnl.sort(key=lambda x: x[1])
 
-        # Return positions ordered by worst PnL first
         return [pos for pos, pnl in positions_with_pnl]
+
 

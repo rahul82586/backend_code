@@ -143,15 +143,40 @@ class Position:
         )
         return new_position
 
-    def update_unrealized_pnl(self, current_market_price: Price):
+    def calculate_deal_realized_pnl(
+        self,
+        close_price: Price,
+        close_volume: Volume,
+        quote_to_account_rate: Decimal = Decimal('1.0')
+    ) -> Money:
         """
-        Calculates current floating PnL.
+        Calculates realized PnL for a partial or full position close deal.
 
-        CRITICAL FIX: Now includes contract_size in calculation.
-        Formula: (CurrentPrice - AvgPrice) * Volume * ContractSize
+        Formula: (ClosePrice - AvgPrice) * CloseVolume * ContractSize * QuoteToAccountRate
+        (For SELL positions: (AvgPrice - ClosePrice) * CloseVolume * ContractSize * QuoteToAccountRate)
         """
-        if self.volume.value == 0:
-            self.unrealized_pnl = Money(Decimal('0'), "USD")
+        if close_volume.value <= Decimal('0'):
+            return Money(Decimal('0'), self.unrealized_pnl.currency)
+
+        diff = close_price.value - self.average_price.value
+        if self.side == OrderType.SELL:
+            diff = -diff
+
+        pnl_val = diff * close_volume.value * self.contract_size * quote_to_account_rate
+        return Money(pnl_val, self.unrealized_pnl.currency)
+
+    def update_unrealized_pnl(
+        self,
+        current_market_price: Price,
+        quote_to_account_rate: Decimal = Decimal('1.0')
+    ):
+        """
+        Calculates current floating PnL with cross-currency conversion.
+
+        Formula: (CurrentPrice - AvgPrice) * Volume * ContractSize * QuoteToAccountRate
+        """
+        if self.volume.value == Decimal('0'):
+            self.unrealized_pnl = Money(Decimal('0'), self.unrealized_pnl.currency)
             return
 
         diff = current_market_price.value - self.average_price.value
@@ -160,12 +185,10 @@ class Position:
         if self.side == OrderType.SELL:
             diff = -diff
 
-        # CORRECTED FORMULA: Include contract_size
-        # Example: EURUSD, 1 lot (100k), 1 pip move (0.0001)
-        # PnL = 0.0001 * 1 * 100000 = $10.00
-        pnl_val = diff * self.volume.value * self.contract_size
-        self.unrealized_pnl = Money(pnl_val, "USD")
+        pnl_val = diff * self.volume.value * self.contract_size * quote_to_account_rate
+        self.unrealized_pnl = Money(pnl_val, self.unrealized_pnl.currency)
 
     def is_closed(self) -> bool:
         """Returns True if position volume is zero."""
-        return self.volume.value == 0
+        return self.volume.value == Decimal('0')
+
