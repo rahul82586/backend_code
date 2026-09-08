@@ -37,6 +37,16 @@ class PreTradeRiskService:
         self.risk_engine = risk_engine
         self._account_locks: Dict[str, asyncio.Lock] = {}
 
+    def get_account_lock(self, account_login: str) -> asyncio.Lock:
+        """
+        Returns the per-account lock to guarantee single-writer isolation
+        during pre-trade risk checks and margin reservations.
+        """
+        login_key = str(account_login)
+        if login_key not in self._account_locks:
+            self._account_locks[login_key] = asyncio.Lock()
+        return self._account_locks[login_key]
+
     async def validate_order(
         self,
         order: Order,
@@ -49,9 +59,10 @@ class PreTradeRiskService:
         Returns True if approved, False if rejected.
         """
         login_key = str(getattr(account, 'login', getattr(account, 'id', 'default')))
-        lock = self._account_locks.setdefault(login_key, asyncio.Lock())
+        lock = self.get_account_lock(login_key)
 
         async with lock:
+
             logger.info(f"Running pre-trade checks for Order {order.ticket_id} on Account {login_key}")
 
             # 1. Account State Check

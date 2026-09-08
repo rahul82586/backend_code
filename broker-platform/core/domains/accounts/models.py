@@ -145,20 +145,27 @@ class Group:
 
     def calculate_margin(self, symbol_config: Dict, volume: Decimal,
                          price: Decimal) -> Decimal:
-        """Calculate required margin for a trade using Decimal precision."""
+        """
+        Calculate required margin for a trade using Decimal precision.
+        Formula: Notional / Leverage (adjusted by custom initial_margin_percent if specified)
+        """
         contract_size = Decimal(str(symbol_config.get("contract_size", 100000)))
         margin_percent = Decimal(str(symbol_config.get("margins", {}).get(
-            "initial_percent", 1.0
+            "initial_percent", 100.0
         )))
 
         # Apply group leverage
         effective_leverage = Decimal(str(min(self.leverage_default, self.leverage_max)))
-        leverage_factor = Decimal('1.0') / effective_leverage
+        if effective_leverage <= Decimal('0'):
+            effective_leverage = Decimal('1.0')
 
         notional = volume * contract_size * price
-        margin = notional * (margin_percent / Decimal('100.0')) * leverage_factor
+        # margin_percent default is 100.0 (100% of standard leverage requirement).
+        # Margin = (Notional / Leverage) * (margin_percent / 100.0)
+        margin = (notional / effective_leverage) * (margin_percent / Decimal('100.0'))
 
         return margin
+
 
     def calculate_commission(self, symbol: str, volume: Decimal,
                              deal_value: Decimal) -> Decimal:
@@ -205,7 +212,7 @@ class Group:
             "currency": self.currency,
             "leverage_default": self.leverage_default,
             "leverage_max": self.leverage_max,
-            "margin_call_level": float(self.margin_call_level),
+            "margin_call_level": str(self.margin_call_level),
             "stop_out_level": float(self.stop_out_level),
             "permissions": {
                 "allowed_symbols": self.permissions.allowed_symbols,
