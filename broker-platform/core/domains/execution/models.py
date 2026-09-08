@@ -84,6 +84,7 @@ class CoverageAccount:
 
     # Net exposure per symbol: {symbol: net_volume}
     net_exposure: Dict[str, Decimal] = field(default_factory=dict)
+    nop_limit: Decimal = Decimal('100.0')  # Max Net Open Position limit per symbol
 
     margin_level: Decimal = Decimal('0')
     trading_state: str = "NEUTRAL"  # NEUTRAL, MARGIN_CALL, STOPPED_OUT
@@ -101,9 +102,20 @@ class CoverageAccount:
         current = self.net_exposure.get(symbol, Decimal('0'))
         self.net_exposure[symbol] = current + volume_delta
 
+    def get_exposure_ratio(self, symbol: str, additional_volume: Decimal = Decimal('0')) -> Decimal:
+        """
+        Returns the net exposure ratio relative to nop_limit (0.0 to 1.0+).
+        Used for NOP threshold alerts (70%), auto-hedging (85%), and blocking (95%).
+        """
+        if self.nop_limit <= Decimal('0'):
+            return Decimal('0')
+        current_abs = abs(self.net_exposure.get(symbol, Decimal('0'))) + abs(additional_volume)
+        return current_abs / self.nop_limit
+
     def get_total_exposure(self) -> Decimal:
         """Returns absolute total exposure across all symbols."""
         return sum(abs(v) for v in self.net_exposure.values())
+
 
 
 @dataclass

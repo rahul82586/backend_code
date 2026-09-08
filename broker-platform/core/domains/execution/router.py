@@ -39,12 +39,14 @@ class SmartOrderRouter:
     def __init__(
         self,
         routing_rule_repo: IRoutingRuleRepository,
-        default_destination: ExecutionDestination = ExecutionDestination.B_BOOK
+        default_destination: ExecutionDestination = ExecutionDestination.B_BOOK,
+        coverage_repo: Optional[Any] = None
     ):
         self.repo = routing_rule_repo
         self.default_destination = default_destination
+        self.coverage_repo = coverage_repo
         self.rules: List[RoutingRule] = []
-        logger.info("SmartOrderRouter initialized with dynamic rule loading")
+        logger.info("SmartOrderRouter initialized with dynamic rule loading and NOP monitoring")
 
     async def refresh_rules(self):
         """Reload routing rules from repository. Call this on startup and periodically."""
@@ -52,16 +54,18 @@ class SmartOrderRouter:
         self.rules = sorted(self.rules, key=lambda r: r.priority, reverse=True)
         logger.info(f"SmartOrderRouter loaded {len(self.rules)} active rules")
 
-    def route(self, order: Order, account: Account) -> ExecutionInstruction:
+    def route(
+        self,
+        order: Order,
+        account: Account,
+        coverage_account: Optional[Any] = None
+    ) -> ExecutionInstruction:
         """
         Evaluate rules and return where this order should go.
-
-        Args:
-            order: The approved order to route.
-            account: The account owning the order (for Group checks).
-
-        Returns:
-            ExecutionInstruction with destination and metadata.
+        Includes NOP (Net Open Position) threshold triggers:
+        - 70%: Warning Alert
+        - 85%: Auto-Hedge (Divert B-Book to A-Book LP Gateway)
+        - 95%: Block B-Book Order (Reject)
         """
         if not self.rules:
             # Auto-refresh if rules haven't been loaded yet
@@ -74,19 +78,47 @@ class SmartOrderRouter:
                 continue
 
             if self._matches(rule, order, account):
+                dest = rule.destination
+                gateway_id = rule.gateway_id or self._select_lp_gateway(rule, account)
+                coverage_id = rule.coverage_account_id or "DEFAULT_COVERAGE"
+
+                # Check Coverage Account NOP limits if routing to B-Book
+                if dest == ExecutionDestination.B_BOOK and coverage_account:
+                    ratio = coverage_account.get_exposure_ratio(order.symbol, order.volume.value)
+
+                    if ratio >= Decimal('0.95'):
+                        logger.error(f"Order {order.ticket_id} blocked: NOP ratio {ratio:.2%} exceeded 95% threshold for {order.symbol}")
+                        return ExecutionInstruction(
+                            destination=ExecutionDestination.REJECT,
+                            rule_id=rule.rule_id,
+                            reason=f"NOP threshold 95% block limit exceeded ({ratio:.2%})"
+                        )
+                    elif ratio >= Decimal('0.85'):
+                        logger.warning(f"Order {order.ticket_id} auto-hedged: NOP ratio {ratio:.2%} exceeded 85% trigger for {order.symbol}")
+                        return ExecutionInstruction(
+                            destination=ExecutionDestination.A_BOOK,
+                            rule_id=rule.rule_id,
+                            gateway_id=gateway_id,
+                            coverage_account_id=coverage_id,
+                            reason=f"NOP threshold 85% breached ({ratio:.2%}) -> Auto-Hedge to A-Book"
+                        )
+                    elif ratio >= Decimal('0.70'):
+                        logger.warning(f"NOP warning: Order {order.ticket_id} ratio {ratio:.2%} reached 70% threshold for {order.symbol}")
+
                 logger.info(
                     f"Order {order.ticket_id} matched rule '{rule.rule_id}' "
-                    f"-> Destination: {rule.destination.value}"
+                    f"-> Destination: {dest.value}"
                 )
                 return ExecutionInstruction(
-                    destination=rule.destination,
+                    destination=dest,
                     rule_id=rule.rule_id,
-                    gateway_id=rule.gateway_id,
-                    coverage_account_id=rule.coverage_account_id,
+                    gateway_id=gateway_id,
+                    coverage_account_id=coverage_id,
                     reason=f"Matched rule: {rule.rule_id}"
                 )
 
         # Fallback to default
+        fallback_gateway = self._select_lp_gateway(None, account)
         logger.warning(
             f"No routing rule matched for order {order.ticket_id}. "
             f"Using default: {self.default_destination.value}"
@@ -94,8 +126,17 @@ class SmartOrderRouter:
         return ExecutionInstruction(
             destination=self.default_destination,
             rule_id="DEFAULT_FALLBACK",
+            gateway_id=fallback_gateway,
             reason="No matching rule found"
         )
+
+    def _select_lp_gateway(self, rule: Optional[RoutingRule], account: Account) -> str:
+        """Selects LP gateway based on rule or group LP priority list."""
+        if rule and rule.gateway_id:
+            return rule.gateway_id
+        if account and account.group and hasattr(account.group, 'routing') and account.group.routing.lp_priority:
+            return account.group.routing.lp_priority[0]
+        return "DEFAULT_LP_GATEWAY"
 
     def _matches(self, rule: RoutingRule, order: Order, account: Account) -> bool:
         """
@@ -126,3 +167,4 @@ class SmartOrderRouter:
                 return False
 
         return True
+
